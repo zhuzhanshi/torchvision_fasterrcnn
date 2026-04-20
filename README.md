@@ -177,12 +177,17 @@ outputs/{model_name}/{exp_name}/{timestamp}/config_snapshot.py
 ```text
 outputs/{model_name}/{exp_name}/{timestamp}/
 ├── config_snapshot.py
+├── env.txt
 ├── train.log
+├── events.jsonl (optional, LOG.JSON=true)
 ├── tb/
 ├── checkpoints/
 ├── eval/
 └── infer/
 ```
+
+- 每次运行默认都会创建新的 `timestamp` 目录，避免覆盖历史实验。
+- 如需复用现有实验目录（常用于 test/infer 复用同一目录），可设置 `RUNTIME.EXISTING_OUTPUT_DIR`。
 
 ## 验证 / 测试评估口径（Evaluator）
 
@@ -264,3 +269,12 @@ outputs/{model_name}/{exp_name}/{timestamp}/infer/
 - `INFER.DRAW_LABEL / DRAW_SCORE / LINE_THICKNESS`：可视化标注控制
 
 > 说明：`INFER.*` 与 `EVAL.*` 参数独立，推理不会读取 `EVAL` 阈值配置。
+
+## 日志与实验管理（Logger/TensorBoard）
+
+- 统一日志入口：`utils/logger.py`，业务模块只依赖 `ExperimentLogger`（`info/warning/error/log_scalars`）。
+- `LOG.TXT=true` 时写入 `train.log`（同时输出到控制台）。
+- `LOG.TENSORBOARD=true` 时写入 `tb/`，可与 txt 独立或同时启用。
+- `LOG.JSON=true` 时写入 `events.jsonl`（结构化日志与标量记录）。
+- `LOG.SAVE_CONFIG_SNAPSHOT=true` 时保存最终生效配置到 `config_snapshot.py`。
+- `LOG.SAVE_ENV_INFO=true` 时保存环境信息到 `env.txt`（Python/torch/torchvision/CUDA/device）。

@@ -191,7 +191,8 @@ class Trainer:
             meter["loss_rpn_box_reg"] += float(loss_dict.get("loss_rpn_box_reg", torch.tensor(0.0)).item())
 
             lr = self.optimizer.param_groups[0]["lr"]
-            if (i + 1) % int(self.cfg["RUNTIME"].get("PRINT_FREQ", self.cfg["TRAIN"].get("PRINT_FREQ", 20))) == 0:
+            print_freq = int(self.cfg["RUNTIME"].get("PRINT_FREQ", self.cfg["TRAIN"].get("PRINT_FREQ", 20)))
+            if (i + 1) % print_freq == 0:
                 eta_sec = (iters - i - 1) * (time.time() - epoch_start) / max(1, i + 1)
                 gpu_mem = torch.cuda.max_memory_allocated() / 1024**2 if self.device.type == "cuda" else 0.0
                 msg = (
@@ -201,23 +202,23 @@ class Trainer:
                     f"loss_box_reg={loss_dict.get('loss_box_reg', torch.tensor(0.)).item():.4f} "
                     f"loss_objectness={loss_dict.get('loss_objectness', torch.tensor(0.)).item():.4f} "
                     f"loss_rpn_box_reg={loss_dict.get('loss_rpn_box_reg', torch.tensor(0.)).item():.4f} "
-                    f"data_time={data_time:.3f}s iter_time={iter_time:.3f}s eta={eta_sec/60:.1f}m gpu_memory={gpu_mem:.1f}MB"
+                    f"data_time={data_time:.3f}s iter_time={iter_time:.3f}s eta={eta_sec/60:.1f}m "
+                    + (f"gpu_memory={gpu_mem:.1f}MB" if self.cfg["LOG"].get("LOG_MEMORY", True) else "gpu_memory=disabled")
                 )
                 self.logger.info(msg)
 
             global_step = epoch * iters + i
-            self.logger.log_scalars(
-                "train_iter",
-                {
+            if self.cfg["LOG"].get("LOG_ITER_LOSS", True):
+                iter_scalars = {
                     "loss_total": loss_value,
                     "loss_classifier": float(loss_dict.get("loss_classifier", torch.tensor(0.0)).item()),
                     "loss_box_reg": float(loss_dict.get("loss_box_reg", torch.tensor(0.0)).item()),
                     "loss_objectness": float(loss_dict.get("loss_objectness", torch.tensor(0.0)).item()),
                     "loss_rpn_box_reg": float(loss_dict.get("loss_rpn_box_reg", torch.tensor(0.0)).item()),
-                    "lr": lr,
-                },
-                global_step,
-            )
+                }
+                if self.cfg["LOG"].get("LOG_LR", True):
+                    iter_scalars["lr"] = lr
+                self.logger.log_scalars("train_iter", iter_scalars, global_step)
 
         epoch_time = time.time() - epoch_start
         avg = {
@@ -231,7 +232,11 @@ class Trainer:
             "best_metric_so_far": self.best_metric,
         }
         self.logger.info(f"epoch={epoch} summary={avg}")
-        self.logger.log_scalars("train_epoch", avg, epoch)
+        if self.cfg["LOG"].get("LOG_EPOCH_LOSS", True):
+            epoch_scalars = dict(avg)
+            if not self.cfg["LOG"].get("LOG_LR", True):
+                epoch_scalars.pop("current_lr", None)
+            self.logger.log_scalars("train_epoch", epoch_scalars, epoch)
         return avg
 
     def validate(self, epoch):

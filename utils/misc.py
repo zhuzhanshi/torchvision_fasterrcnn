@@ -5,7 +5,7 @@ import math
 
 
 def now_str():
-    return dt.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    return dt.datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
 
 
 def to_device(images, targets, device):

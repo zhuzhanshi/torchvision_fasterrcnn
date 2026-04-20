@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datasets.builder import build_dataloaders
 from models.builder import build_model, load_model_weights
 from utils.config import pretty_cfg, snapshot_config
-from utils.env import collect_env_info
+from utils.env import collect_env_info, save_env_info
 from utils.file_io import ensure_dir
 from utils.logger import build_logger
 from utils.misc import now_str
@@ -63,6 +63,13 @@ def build_scheduler(cfg, optimizer):
 
 
 def build_output_dir(cfg):
+    existing = cfg["RUNTIME"].get("EXISTING_OUTPUT_DIR", "")
+    if existing:
+        ensure_dir(existing)
+        for d in ["checkpoints", "eval", "infer", cfg["LOG"].get("LOG_DIR_NAME", "tb")]:
+            ensure_dir(os.path.join(existing, d))
+        return existing
+
     root = cfg["RUNTIME"]["OUTPUT_ROOT"]
     model_name = cfg["MODEL"]["NAME"]
     exp_name = cfg["RUNTIME"]["EXP_NAME"]
@@ -75,11 +82,13 @@ def build_output_dir(cfg):
 
 
 def log_meta(logger, cfg, args, output_dir):
-    if not cfg["LOG"].get("SAVE_ENV_INFO", True):
-        logger.info(f"Start time={now_str()} config={args.config} output_dir={output_dir}")
-        return
-    env = collect_env_info(cfg["RUNTIME"]["DEVICE"])
     logger.info(f"Start time={now_str()} config={args.config} output_dir={output_dir}")
+    env = collect_env_info(cfg["RUNTIME"]["DEVICE"])
+    if cfg["LOG"].get("SAVE_ENV_INFO", True):
+        try:
+            save_env_info(env, os.path.join(output_dir, cfg["LOG"].get("ENV_FILENAME", "env.txt")))
+        except Exception as e:
+            logger.warning(f"Failed to save env info file: {e}")
     logger.info(f"Env: {env}")
     logger.info(
         f"Dataset type={cfg['DATASET']['TYPE']} num_classes={cfg['DATASET']['NUM_CLASSES']} classes={cfg['DATASET']['CLASSES']}"
@@ -105,7 +114,10 @@ def build_runtime(cfg, args):
     output_dir = build_output_dir(cfg)
     logger = build_logger(cfg, output_dir)
     if cfg["LOG"].get("SAVE_CONFIG_SNAPSHOT", True):
-        snapshot_config(cfg, output_dir)
+        try:
+            snapshot_config(cfg, output_dir)
+        except Exception as e:
+            logger.warning(f"Failed to write config snapshot: {e}")
     log_meta(logger, cfg, args, output_dir)
 
     set_seed(cfg["RUNTIME"].get("SEED", 42))
@@ -113,6 +125,8 @@ def build_runtime(cfg, args):
     device = torch.device(cfg["RUNTIME"].get("DEVICE", "cuda" if torch.cuda.is_available() else "cpu"))
 
     model = build_model(cfg).to(device)
+    if cfg["LOG"].get("LOG_MODEL_STRUCTURE", False):
+        logger.info(f"Model structure:\n{model}")
 
     if cfg["RUNTIME"].get("RESUME") and cfg["RUNTIME"].get("WEIGHTS"):
         logger.info("Both RUNTIME.RESUME and RUNTIME.WEIGHTS are set. Resume state will take precedence once Trainer resumes.")

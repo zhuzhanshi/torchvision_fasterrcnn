@@ -4,6 +4,8 @@ from pathlib import Path
 
 
 def ensure_dir(path):
+    if path is None or str(path).strip() == "":
+        raise ValueError("Directory path is empty.")
     Path(path).mkdir(parents=True, exist_ok=True)
 
 
@@ -17,3 +19,9 @@ def dump_text(text: str, path: str):
     ensure_dir(os.path.dirname(path))
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
+
+
+def append_jsonl(obj, path: str):
+    ensure_dir(os.path.dirname(path))
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(obj, ensure_ascii=False) + "\n")
