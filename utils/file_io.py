@@ -4,8 +4,10 @@ from pathlib import Path
 
 
 def ensure_dir(path):
-    if path is None or str(path).strip() == "":
-        raise ValueError("Directory path is empty.")
+    if path is None:
+        raise ValueError("Directory path is None.")
+    if str(path).strip() == "":
+        return
     Path(path).mkdir(parents=True, exist_ok=True)
 
 
