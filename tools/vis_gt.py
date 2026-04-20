@@ -17,6 +17,8 @@ def main():
     args = parser.parse_args()
 
     cfg = load_config(args.config)
+    # For visualization, keep geometry transforms but disable normalization for readable images.
+    cfg["INPUT"]["NORMALIZE"] = False
     ds = build_dataset(cfg, split=args.split)
     os.makedirs(args.output_dir, exist_ok=True)
 

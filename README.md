@@ -125,6 +125,24 @@ ROOT/
 - `DATASET.IGNORE_DIFFICULT`：VOC 中忽略 difficult 目标
 - `DATASET.CHECK_DATASET`：启用更严格的文件存在性检查
 
+## 预处理与增强（Detection）
+
+- 所有 transforms 都使用 detection 接口：`image, target -> image, target`。
+- `target["boxes"]` 会随几何增强同步更新（flip / resize / crop）。
+- 颜色增强（如 `ColorJitter`）只改像素，不改 bbox。
+- train 与 val/test 口径分离：
+  - train：`AUG.TRAIN.*`（`HFLIP/VFLIP/COLOR_JITTER/RANDOM_RESIZE/RANDOM_CROP`）
+  - val/test：`AUG.TEST.*`（可选 resize）
+- `datasets/transforms.py` 仅消费 `INPUT.*` 作为数据侧预处理配置；模型 transform 参数由 `MODEL.*` 在 model builder 侧消费。
+
+### Detection Collate 约定
+
+- DataLoader 使用 `datasets/collate.py` 的 `detection_collate_fn`。
+- batch 组织形式为：
+  - `images: list[Tensor[C,H,W]]`
+  - `targets: list[dict]`
+- 不会将不同尺寸图像强行 `stack` 成单个 tensor（符合 torchvision detection 预期）。
+
 ### RESUME 与 WEIGHTS 的语义
 
 - `RESUME`：恢复完整训练状态（model + optimizer + scheduler + scaler + epoch）
