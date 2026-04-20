@@ -132,8 +132,13 @@ def run_train(ctx: RuntimeContext):
     if ctx.cfg["RUNTIME"].get("EVAL_BEFORE_TRAIN", False):
         run_test(ctx)
     _, loaders = build_dataloaders(ctx.cfg, mode="train")
+    if len(loaders["train"]) == 0:
+        raise RuntimeError("Train dataloader is empty; cannot start training.")
     optimizer = build_optimizer(ctx.cfg, ctx.model)
     scheduler = build_scheduler(ctx.cfg, optimizer)
+    warmup_cfg = ctx.cfg["SCHEDULER"].get("WARMUP", {})
+    if warmup_cfg.get("ENABLED", False):
+        ctx.logger.warning("SCHEDULER.WARMUP is enabled but warmup logic is not implemented yet (TODO).")
     trainer = Trainer(
         ctx.cfg,
         ctx.model,

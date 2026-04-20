@@ -13,8 +13,16 @@ class ExperimentLogger:
         if self.txt_logger:
             self.txt_logger.info(msg)
 
+    def warning(self, msg):
+        if self.txt_logger:
+            self.txt_logger.warning(msg)
+
+    def error(self, msg):
+        if self.txt_logger:
+            self.txt_logger.error(msg)
+
     def log_scalars(self, tag, values, step):
-        if self.tb_logger:
+        if self.tb_logger and isinstance(values, dict):
             self.tb_logger.add_scalars(tag, values, step)
 
     def close(self):

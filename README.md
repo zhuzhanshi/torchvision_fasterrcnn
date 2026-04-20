@@ -150,6 +150,18 @@ ROOT/
 
 > 建议：训练中断续训使用 `RESUME`；评估/推理或迁移学习初始化使用 `WEIGHTS`。
 
+## 训练链路说明（Trainer）
+
+- 训练主流程集中在 `engine/trainer.py`：`train()` / `train_one_epoch()` / `validate()` / `save_checkpoint()`。
+- 支持 detection loss dict 汇总（`loss_classifier/loss_box_reg/loss_objectness/loss_rpn_box_reg` + `loss_total`）。
+- 支持 AMP（`RUNTIME.USE_AMP` 或 `--amp`）、梯度累积（`TRAIN.ACCUMULATION_STEPS`）、梯度裁剪（`TRAIN.GRAD_CLIP`）。
+- scheduler 默认按 **epoch** `step`（支持 `StepLR/MultiStepLR/CosineAnnealingLR`）。
+- checkpoint 默认保存到 `checkpoints/latest.pth`，best 指标更新时保存 `checkpoints/best.pth`，并包含：
+  - `model/optimizer/scheduler/scaler`
+  - `epoch`
+  - `best_metric`
+  - 关键配置摘要
+
 ## Config Snapshot
 
 - 默认会在每次运行时把“最终生效配置（含 CLI 覆盖）”写入：

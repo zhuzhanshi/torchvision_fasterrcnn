@@ -74,7 +74,14 @@ def normalize_cfg(cfg: dict):
         runtime["RESUME"] = train["RESUME"]
     train["PRINT_FREQ"] = runtime.get("PRINT_FREQ", train.get("PRINT_FREQ", 20))
     train["VAL_EVERY_EPOCH"] = train.get("VALIDATE_EVERY_EPOCH", train.get("VAL_EVERY_EPOCH", 1))
-    train["GRAD_CLIP_NORM"] = train.get("GRAD_CLIP", train.get("GRAD_CLIP_NORM", 0.0))
+    grad_clip_cfg = train.get("GRAD_CLIP", 0.0)
+    if isinstance(grad_clip_cfg, dict):
+        train["GRAD_CLIP_NORM"] = float(grad_clip_cfg.get("MAX_NORM", 0.0))
+        if train["GRAD_CLIP_NORM"] > 0 and "ENABLE" not in grad_clip_cfg:
+            grad_clip_cfg["ENABLE"] = True
+        train["GRAD_CLIP"] = grad_clip_cfg
+    else:
+        train["GRAD_CLIP_NORM"] = float(grad_clip_cfg if grad_clip_cfg is not None else train.get("GRAD_CLIP_NORM", 0.0))
 
     # Eval aliases
     eval_cfg = cfg.get("EVAL", {})

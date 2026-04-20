@@ -172,7 +172,11 @@ CFG = {
     "TRAIN": {
         "EPOCHS": 12,
         "START_EPOCH": 0,
-        "GRAD_CLIP": 0.0,
+        "GRAD_CLIP": {
+            "ENABLE": False,
+            "MAX_NORM": 0.0,
+            "NORM_TYPE": 2.0,
+        },
         "ACCUMULATION_STEPS": 1,
         "EMPTY_CACHE_PER_EPOCH": False,
         "VALIDATE_EVERY_EPOCH": 1,
