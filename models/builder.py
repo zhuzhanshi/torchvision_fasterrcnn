@@ -151,6 +151,14 @@ def build_model(cfg: Dict):
     model_fn = MODEL_FACTORY[model_name]
     weights, weights_backbone = _resolve_official_weights(model_fn, cfg["MODEL"])
     kwargs = _build_constructor_kwargs(cfg)
+    # torchvision mobilenet Faster R-CNN wrappers already construct and pass a built-in
+    # anchor generator internally; forwarding rpn_anchor_generator again causes:
+    # "FasterRCNN() got multiple values for keyword argument 'rpn_anchor_generator'".
+    if model_name in {
+        "fasterrcnn_mobilenet_v3_large_fpn",
+        "fasterrcnn_mobilenet_v3_large_320_fpn",
+    }:
+        kwargs.pop("rpn_anchor_generator", None)
     kwargs.update({"weights": weights, "weights_backbone": weights_backbone})
 
     model = model_fn(**kwargs)
