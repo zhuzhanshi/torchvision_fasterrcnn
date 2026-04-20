@@ -2,8 +2,12 @@ import os
 
 import torch
 
+from .dist import is_main_process
+
 
 def save_checkpoint(path, state):
+    if not is_main_process():
+        return
     os.makedirs(os.path.dirname(path), exist_ok=True)
     torch.save(state, path)
 

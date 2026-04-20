@@ -15,6 +15,7 @@ except Exception:  # pragma: no cover - import guard for optional dependency
     COCOeval = None
 
 from utils.file_io import dump_json
+from utils.dist import all_gather, barrier, is_main_process
 from utils.metrics import save_eval_outputs
 from utils.misc import to_device
 
@@ -122,32 +123,48 @@ class Evaluator:
                         }
                     )
 
-        metrics, per_class_ap = self._compute_metrics(
-            gt_dict=gt_coco,
-            predictions=predictions,
-            per_class=compute_per_class,
-            use_coco_eval=use_coco_eval,
-            label_to_cat_name=label_to_cat_name,
-            label_to_cat_id=label_to_cat_id,
-        )
-        metrics["eval_time"] = time.time() - start
-        metrics["num_images"] = len(gt_coco["images"])
-        metrics["num_predictions"] = len(predictions)
-        metrics["metric_name"] = metric_name
-        metrics["best_metric_key"] = "map"
-        metrics["mAP"] = metrics["map"]  # backward-compatible aliases
-        metrics["AP50"] = metrics["map50"]
-        metrics["AP75"] = metrics["map75"]
-        metrics["AR"] = metrics["ar"]
+        gathered_predictions = []
+        gathered_gt = []
+        for part in all_gather(predictions):
+            gathered_predictions.extend(part)
+        for part in all_gather(gt_coco):
+            gathered_gt.append(part)
 
-        if output_dir:
+        if is_main_process():
+            merged_gt = self._merge_gt_dicts(gathered_gt)
+            metrics, per_class_ap = self._compute_metrics(
+                gt_dict=merged_gt,
+                predictions=gathered_predictions,
+                per_class=compute_per_class,
+                use_coco_eval=use_coco_eval,
+                label_to_cat_name=label_to_cat_name,
+                label_to_cat_id=label_to_cat_id,
+            )
+            metrics["eval_time"] = time.time() - start
+            metrics["num_images"] = len(merged_gt["images"])
+            metrics["num_predictions"] = len(gathered_predictions)
+            metrics["metric_name"] = metric_name
+            metrics["best_metric_key"] = "map"
+            metrics["mAP"] = metrics["map"]  # backward-compatible aliases
+            metrics["AP50"] = metrics["map50"]
+            metrics["AP75"] = metrics["map75"]
+            metrics["AR"] = metrics["ar"]
+        else:
+            merged_gt = None
+            metrics, per_class_ap = {}, []
+
+        gathered_result = all_gather({"metrics": metrics, "per_class_ap": per_class_ap})
+        metrics = gathered_result[0]["metrics"]
+        per_class_ap = gathered_result[0]["per_class_ap"]
+
+        if is_main_process() and output_dir:
             save_eval_outputs(metrics, per_class_ap, output_dir)
             if save_predictions:
-                dump_json(predictions, os.path.join(output_dir, "predictions.json"))
+                dump_json(gathered_predictions, os.path.join(output_dir, "predictions.json"))
             if save_gt:
-                dump_json(gt_coco, os.path.join(output_dir, "ground_truth.json"))
+                dump_json(merged_gt, os.path.join(output_dir, "ground_truth.json"))
 
-        if self.logger:
+        if is_main_process() and self.logger:
             self.logger.info(
                 "Eval bbox metrics | "
                 f"mAP={metrics['map']:.4f} AP50={metrics['map50']:.4f} AP75={metrics['map75']:.4f} "
@@ -156,7 +173,35 @@ class Evaluator:
             if per_class_ap:
                 self.logger.info(f"Eval per-class AP: {per_class_ap}")
 
+        barrier()
         return metrics, per_class_ap
+
+    def _merge_gt_dicts(self, parts):
+        merged = {"images": [], "annotations": [], "categories": []}
+        seen_img = set()
+        seen_ann = set()
+        cat_map = {}
+        next_ann_id = 1
+        for gt in parts:
+            for c in gt.get("categories", []):
+                cat_map[int(c["id"])] = c
+            for img in gt.get("images", []):
+                iid = int(img["id"])
+                if iid in seen_img:
+                    continue
+                seen_img.add(iid)
+                merged["images"].append({"id": iid})
+            for ann in gt.get("annotations", []):
+                raw_id = int(ann.get("id", next_ann_id))
+                if raw_id in seen_ann:
+                    raw_id = next_ann_id
+                seen_ann.add(raw_id)
+                next_ann_id = max(next_ann_id, raw_id + 1)
+                copied = dict(ann)
+                copied["id"] = raw_id
+                merged["annotations"].append(copied)
+        merged["categories"] = [cat_map[k] for k in sorted(cat_map.keys())]
+        return merged
 
     def _build_category_mapping(self, dataset) -> Tuple[Dict[int, int], Dict[int, str]]:
         class_names = list(self.cfg["DATASET"].get("CLASSES", []))

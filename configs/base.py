@@ -15,6 +15,12 @@ CFG = {
         "CUDNN_BENCHMARK": False,
         "DETERMINISTIC": False,
         "USE_AMP": True,
+        "DISTRIBUTED": False,
+        "DIST_BACKEND": "",
+        "DIST_URL": "env://",
+        "WORLD_SIZE": 1,
+        "RANK": 0,
+        "LOCAL_RANK": 0,
         "RESUME": "",  # resume full training state
         "WEIGHTS": "",  # load model-only weights
         "AUTO_RESUME": False,

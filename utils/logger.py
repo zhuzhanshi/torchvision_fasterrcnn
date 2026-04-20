@@ -9,10 +9,11 @@ from .txt_logger import build_txt_logger
 
 
 class ExperimentLogger:
-    def __init__(self, txt_logger=None, tb_logger=None, json_log_path=None):
+    def __init__(self, txt_logger=None, tb_logger=None, json_log_path=None, enabled=True):
         self.txt_logger = txt_logger
         self.tb_logger = tb_logger
         self.json_log_path = json_log_path
+        self.enabled = enabled
         self._console = logging.getLogger("experiment_console")
         self._console.setLevel(logging.INFO)
         self._console.propagate = False
@@ -22,6 +23,8 @@ class ExperimentLogger:
             self._console.addHandler(sh)
 
     def _log(self, level: str, msg: str):
+        if not self.enabled:
+            return
         logger = self.txt_logger or self._console
         if hasattr(logger, level):
             getattr(logger, level)(msg)
@@ -53,6 +56,8 @@ class ExperimentLogger:
         self._log("error", f"{msg}\n{traceback.format_exc()}")
 
     def log_scalars(self, tag, values, step):
+        if not self.enabled:
+            return
         if not isinstance(values, dict):
             return
         if self.tb_logger:
@@ -80,16 +85,16 @@ class ExperimentLogger:
             self.tb_logger.close()
 
 
-def build_logger(cfg, output_dir):
+def build_logger(cfg, output_dir, is_main_process=True):
     txt_logger = None
     tb_logger = None
     json_log_path = None
 
-    if cfg["LOG"].get("TXT", True):
+    if is_main_process and cfg["LOG"].get("TXT", True):
         txt_path = os.path.join(output_dir, cfg["LOG"].get("TXT_FILENAME", "train.log"))
         txt_logger = build_txt_logger(txt_path)
 
-    if cfg["LOG"].get("TENSORBOARD", True):
+    if is_main_process and cfg["LOG"].get("TENSORBOARD", True):
         tb_dir = os.path.join(output_dir, cfg["LOG"].get("LOG_DIR_NAME", "tb"))
         try:
             tb_logger = TBLogger(tb_dir)
@@ -99,7 +104,12 @@ def build_logger(cfg, output_dir):
             )
             tb_logger = None
 
-    if cfg["LOG"].get("JSON", False):
+    if is_main_process and cfg["LOG"].get("JSON", False):
         json_log_path = os.path.join(output_dir, cfg["LOG"].get("JSON_LOG_FILENAME", "events.jsonl"))
 
-    return ExperimentLogger(txt_logger=txt_logger, tb_logger=tb_logger, json_log_path=json_log_path)
+    return ExperimentLogger(
+        txt_logger=txt_logger,
+        tb_logger=tb_logger,
+        json_log_path=json_log_path,
+        enabled=is_main_process,
+    )

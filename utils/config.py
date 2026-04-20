@@ -66,6 +66,12 @@ def normalize_cfg(cfg: dict):
     runtime = cfg.get("RUNTIME", {})
     if "DEVICE" in runtime and runtime["DEVICE"] is not None:
         runtime["DEVICE"] = str(runtime["DEVICE"]).lower()
+    runtime["DISTRIBUTED"] = bool(runtime.get("DISTRIBUTED", False))
+    runtime["DIST_URL"] = runtime.get("DIST_URL", "env://")
+    runtime["DIST_BACKEND"] = runtime.get("DIST_BACKEND", "")
+    runtime["WORLD_SIZE"] = int(runtime.get("WORLD_SIZE", os.environ.get("WORLD_SIZE", 1)))
+    runtime["RANK"] = int(runtime.get("RANK", os.environ.get("RANK", 0)))
+    runtime["LOCAL_RANK"] = int(runtime.get("LOCAL_RANK", os.environ.get("LOCAL_RANK", 0)))
     train = cfg.get("TRAIN", {})
     if "USE_AMP" not in runtime and "AMP" in train:
         runtime["USE_AMP"] = bool(train["AMP"])
@@ -170,6 +176,9 @@ def merge_cli_args(cfg, args):
     if getattr(args, "amp", None) is not None:
         cfg["RUNTIME"]["USE_AMP"] = bool(args.amp)
         cfg["TRAIN"]["AMP"] = bool(args.amp)
+
+    if getattr(args, "local_rank", None) is not None:
+        cfg["RUNTIME"]["LOCAL_RANK"] = int(args.local_rank)
 
     return normalize_cfg(cfg)
 

@@ -6,7 +6,7 @@ import torchvision
 from .file_io import dump_text
 
 
-def collect_env_info(device):
+def collect_env_info(device, runtime_info: dict | None = None):
     gpu_names = []
     npu_available = False
     npu_device_count = 0
@@ -23,7 +23,7 @@ def collect_env_info(device):
             npu_names = []
     if torch.cuda.is_available():
         gpu_names = [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
-    return {
+    info = {
         "python": platform.python_version(),
         "torch": torch.__version__,
         "torchvision": torchvision.__version__,
@@ -37,6 +37,17 @@ def collect_env_info(device):
         "npu_names": npu_names,
         "runtime_device_type": str(device),
     }
+    if runtime_info:
+        info.update(
+            {
+                "distributed_enabled": bool(runtime_info.get("DISTRIBUTED", False)),
+                "dist_backend": runtime_info.get("DIST_BACKEND", ""),
+                "world_size": int(runtime_info.get("WORLD_SIZE", 1)),
+                "rank": int(runtime_info.get("RANK", 0)),
+                "local_rank": int(runtime_info.get("LOCAL_RANK", 0)),
+            }
+        )
+    return info
 
 
 def format_env_info(info: dict) -> str:

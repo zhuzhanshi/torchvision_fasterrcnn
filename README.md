@@ -47,6 +47,35 @@ python main.py --config configs/fasterrcnn_resnet50_fpn.py --mode infer --device
 - 当前实现为**单卡 NPU 支持**（不含 DDP/HCCL）。
 - 当 `RUNTIME.DEVICE=npu` 时会在运行时尝试导入 `torch_npu`；若缺失会给出明确错误。
 
+### 多卡分布式训练（DDP）
+
+当前版本已支持 **DDP 多卡训练**（train 为主），并按设备自动选择 backend：
+- CUDA -> `nccl`
+- NPU -> `hccl`
+- CPU -> `gloo`
+
+推荐使用 `torchrun`：
+
+```bash
+# CUDA 多卡示例（2卡）
+torchrun --nproc_per_node=2 main.py \
+  --config configs/fasterrcnn_resnet50_fpn.py \
+  --mode train \
+  --device cuda \
+  --data-root /path/to/data
+
+# NPU 多卡示例（2卡，需 torch_npu + Ascend 环境）
+torchrun --nproc_per_node=2 main.py \
+  --config configs/fasterrcnn_resnet50_fpn.py \
+  --mode train \
+  --device npu \
+  --data-root /path/to/data
+```
+
+说明：
+- infer 当前仍按单机单设备路径运行（不做分布式 infer）。
+- validate/test 具备基础分布式兼容：会跨 rank 汇总预测与 GT 后由 rank0 统一计算指标并写盘。
+
 ### 方式 B：薄封装入口
 
 ```bash
@@ -297,6 +326,7 @@ outputs/{model_name}/{exp_name}/{timestamp}/infer/
 - `INFER.DRAW_LABEL / DRAW_SCORE / LINE_THICKNESS`：可视化标注控制
 
 > 说明：`INFER.*` 与 `EVAL.*` 参数独立，推理不会读取 `EVAL` 阈值配置。
+> 当前 infer 不实现分布式推理，保持单机单设备路径。
 
 ## 日志与实验管理（Logger/TensorBoard）
 

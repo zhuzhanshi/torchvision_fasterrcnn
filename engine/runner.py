@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datasets.builder import build_dataloaders
 from models.builder import build_model, load_model_weights
 from utils.config import pretty_cfg, snapshot_config
+from utils.dist import barrier, get_rank, get_world_size, init_distributed_mode, is_main_process
 from utils.env import collect_env_info, save_env_info
 from utils.file_io import ensure_dir
 from utils.logger import build_logger
@@ -25,6 +26,7 @@ class RuntimeContext:
     logger: object
     device: object
     model: object
+    distributed: bool
 
 
 def build_optimizer(cfg, model):
@@ -82,8 +84,10 @@ def build_output_dir(cfg):
 
 
 def log_meta(logger, cfg, args, output_dir):
+    if not is_main_process():
+        return
     logger.info(f"Start time={now_str()} config={args.config} output_dir={output_dir}")
-    env = collect_env_info(cfg["RUNTIME"]["DEVICE"])
+    env = collect_env_info(cfg["RUNTIME"]["DEVICE"], runtime_info=cfg["RUNTIME"])
     if cfg["LOG"].get("SAVE_ENV_INFO", True):
         try:
             save_env_info(env, os.path.join(output_dir, cfg["LOG"].get("ENV_FILENAME", "env.txt")))
@@ -112,13 +116,16 @@ def _resolve_runtime_device(cfg, logger):
     import torch
 
     req = str(cfg["RUNTIME"].get("DEVICE", "cuda" if torch.cuda.is_available() else "cpu")).lower()
+    local_rank = int(cfg["RUNTIME"].get("LOCAL_RANK", 0))
 
     if req.startswith("cpu"):
         device = torch.device("cpu")
     elif req.startswith("cuda"):
         if not torch.cuda.is_available():
             raise RuntimeError("RUNTIME.DEVICE is set to CUDA, but torch.cuda.is_available() is False.")
-        device = torch.device(req if ":" in req else "cuda")
+        device = torch.device(req if ":" in req else f"cuda:{local_rank}")
+        if hasattr(torch.cuda, "set_device"):
+            torch.cuda.set_device(device)
     elif req.startswith("npu"):
         try:
             import torch_npu  # noqa: F401
@@ -129,7 +136,7 @@ def _resolve_runtime_device(cfg, logger):
             ) from e
         if not hasattr(torch, "npu"):
             raise RuntimeError("torch_npu imported, but torch.npu backend is unavailable.")
-        device = torch.device(req if ":" in req else "npu:0")
+        device = torch.device(req if ":" in req else f"npu:{local_rank}")
         if hasattr(torch.npu, "set_device"):
             torch.npu.set_device(device)
         avail = torch.npu.is_available() if hasattr(torch.npu, "is_available") else True
@@ -145,13 +152,30 @@ def _resolve_runtime_device(cfg, logger):
 def build_runtime(cfg, args):
     import torch
 
-    output_dir = build_output_dir(cfg)
-    logger = build_logger(cfg, output_dir)
+    distributed = init_distributed_mode(cfg)
+
+    # Build one shared output dir for all ranks in a distributed job.
+    if distributed:
+        if is_main_process():
+            output_dir = build_output_dir(cfg)
+        else:
+            output_dir = ""
+        shared = [output_dir]
+        torch.distributed.broadcast_object_list(shared, src=0)
+        output_dir = shared[0]
+        for d in ["", "checkpoints", "eval", "infer", cfg["LOG"].get("LOG_DIR_NAME", "tb")]:
+            ensure_dir(os.path.join(output_dir, d) if d else output_dir)
+        barrier()
+    else:
+        output_dir = build_output_dir(cfg)
+
+    logger = build_logger(cfg, output_dir, is_main_process=is_main_process())
     if cfg["LOG"].get("SAVE_CONFIG_SNAPSHOT", True):
-        try:
-            snapshot_config(cfg, output_dir)
-        except Exception as e:
-            logger.warning(f"Failed to write config snapshot: {e}")
+        if is_main_process():
+            try:
+                snapshot_config(cfg, output_dir)
+            except Exception as e:
+                logger.warning(f"Failed to write config snapshot: {e}")
     log_meta(logger, cfg, args, output_dir)
 
     set_seed(cfg["RUNTIME"].get("SEED", 42))
@@ -159,6 +183,14 @@ def build_runtime(cfg, args):
     device = _resolve_runtime_device(cfg, logger)
 
     model = build_model(cfg).to(device)
+    if distributed:
+        from torch.nn.parallel import DistributedDataParallel as DDP
+
+        local_rank = int(cfg["RUNTIME"].get("LOCAL_RANK", 0))
+        if device.type in {"cuda", "npu"}:
+            model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=False)
+        else:
+            model = DDP(model, find_unused_parameters=False)
     if cfg["LOG"].get("LOG_MODEL_STRUCTURE", False):
         logger.info(f"Model structure:\n{model}")
 
@@ -177,7 +209,19 @@ def build_runtime(cfg, args):
             f"missing={len(load_info['missing_keys'])}, unexpected={len(load_info['unexpected_keys'])}"
         )
 
-    return RuntimeContext(cfg=cfg, args=args, output_dir=output_dir, logger=logger, device=device, model=model)
+    logger.info(
+        f"Distributed runtime: enabled={distributed} backend={cfg['RUNTIME'].get('DIST_BACKEND', '')} "
+        f"world_size={get_world_size()} rank={get_rank()} local_rank={cfg['RUNTIME'].get('LOCAL_RANK', 0)}"
+    )
+    return RuntimeContext(
+        cfg=cfg,
+        args=args,
+        output_dir=output_dir,
+        logger=logger,
+        device=device,
+        model=model,
+        distributed=distributed,
+    )
 
 
 def run_train(ctx: RuntimeContext):
@@ -213,6 +257,11 @@ def run_test(ctx: RuntimeContext):
 
 
 def run_infer(ctx: RuntimeContext):
+    if ctx.distributed and get_world_size() > 1:
+        if is_main_process():
+            ctx.logger.warning("Distributed infer is not supported in this version. Running on rank0 only.")
+        if not is_main_process():
+            return
     inferencer = Inferencer(ctx.cfg, ctx.logger)
     out_dir = ctx.cfg["INFER"].get("OUTPUT_DIR") or os.path.join(ctx.output_dir, "infer")
     inferencer.run(ctx.model, ctx.device, output_dir=out_dir)

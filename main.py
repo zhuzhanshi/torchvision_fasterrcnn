@@ -36,6 +36,7 @@ def parse_args(default_mode=None):
     parser.add_argument("--save-vis", "--save_vis", dest="save_vis", type=_str2bool, default=None)
     parser.add_argument("--num-workers", "--num_workers", dest="num_workers", type=int, default=None)
     parser.add_argument("--amp", type=_str2bool, default=None)
+    parser.add_argument("--local-rank", "--local_rank", dest="local_rank", type=int, default=None)
 
     args = parser.parse_args()
     args.default_mode = default_mode

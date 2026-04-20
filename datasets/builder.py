@@ -4,6 +4,7 @@ import os
 from typing import Tuple
 
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
 from .coco import COCODataset
 from .collate import detection_collate_fn
@@ -88,8 +89,19 @@ def _batch_size_for_split(cfg, split):
 
 def build_dataloader(cfg, split="train"):
     dataset = build_dataset(cfg, split)
+    runtime = cfg.get("RUNTIME", {})
+    distributed = bool(runtime.get("DISTRIBUTED", False))
     shuffle = cfg["DATALOADER"].get("SHUFFLE", True) if split == "train" else False
-    sampler = build_sampler(dataset, shuffle=shuffle)
+    if distributed:
+        sampler = DistributedSampler(
+            dataset,
+            num_replicas=int(runtime.get("WORLD_SIZE", 1)),
+            rank=int(runtime.get("RANK", 0)),
+            shuffle=shuffle,
+            drop_last=bool(cfg["DATALOADER"].get("DROP_LAST", False) if split == "train" else False),
+        )
+    else:
+        sampler = build_sampler(dataset, shuffle=shuffle)
     loader = DataLoader(
         dataset,
         batch_size=_batch_size_for_split(cfg, split),

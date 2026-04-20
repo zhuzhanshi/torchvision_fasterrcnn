@@ -9,6 +9,7 @@ import torch
 
 from .evaluator import Evaluator
 from utils.checkpoint import load_checkpoint, save_checkpoint
+from utils.dist import is_main_process, reduce_dict
 from utils.misc import is_finite_number, to_device
 
 
@@ -34,6 +35,10 @@ class Trainer:
         resume_path = cfg["RUNTIME"].get("RESUME", cfg["TRAIN"].get("RESUME", ""))
         if resume_path:
             self.resume(resume_path)
+
+    @staticmethod
+    def _unwrap_model(model):
+        return model.module if hasattr(model, "module") else model
 
     def _build_scaler(self, device):
         if not self.amp_enabled:
@@ -68,7 +73,7 @@ class Trainer:
             if k not in ckpt:
                 raise KeyError(f"Resume checkpoint missing required key: {k}")
 
-        self.model.load_state_dict(ckpt["model"])
+        self._unwrap_model(self.model).load_state_dict(ckpt["model"])
         self.optimizer.load_state_dict(ckpt["optimizer"])
 
         if self.scheduler is not None and ckpt.get("scheduler") is not None:
@@ -82,7 +87,7 @@ class Trainer:
 
     def _build_checkpoint_state(self, epoch):
         return {
-            "model": self.model.state_dict(),
+            "model": self._unwrap_model(self.model).state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "scheduler": self.scheduler.state_dict() if self.scheduler else None,
             "scaler": self.scaler.state_dict() if self.scaler and self.scaler.is_enabled() else None,
@@ -121,12 +126,15 @@ class Trainer:
             raise RuntimeError("train_loader is empty. Cannot start training.")
 
         total_epochs = int(self.cfg["TRAIN"]["EPOCHS"])
-        self.logger.info(
-            f"Training started: start_epoch={self.start_epoch}, total_epochs={total_epochs}, "
-            f"accumulation={self.cfg['TRAIN'].get('ACCUMULATION_STEPS', 1)}, amp={self.amp_enabled}, device={self.device}"
-        )
+        if is_main_process():
+            self.logger.info(
+                f"Training started: start_epoch={self.start_epoch}, total_epochs={total_epochs}, "
+                f"accumulation={self.cfg['TRAIN'].get('ACCUMULATION_STEPS', 1)}, amp={self.amp_enabled}, device={self.device}"
+            )
 
         for epoch in range(self.start_epoch, total_epochs):
+            if hasattr(self.train_loader, "sampler") and hasattr(self.train_loader.sampler, "set_epoch"):
+                self.train_loader.sampler.set_epoch(epoch)
             train_stats = self.train_one_epoch(epoch)
 
             eval_enabled = bool(self.cfg["EVAL"].get("ENABLE", self.cfg["EVAL"].get("ENABLED", True)))
@@ -152,10 +160,11 @@ class Trainer:
             if self.scheduler:
                 self.scheduler.step()
 
-            self.logger.info(
-                f"epoch={epoch} done | avg_loss_total={train_stats['avg_loss_total']:.6f} "
-                f"lr={self.optimizer.param_groups[0]['lr']:.8f} best_metric={self.best_metric:.6f}"
-            )
+            if is_main_process():
+                self.logger.info(
+                    f"epoch={epoch} done | avg_loss_total={train_stats['avg_loss_total']:.6f} "
+                    f"lr={self.optimizer.param_groups[0]['lr']:.8f} best_metric={self.best_metric:.6f}"
+                )
 
             if self.cfg["TRAIN"].get("EMPTY_CACHE_PER_EPOCH", False) and self.device.type == "cuda":
                 torch.cuda.empty_cache()
@@ -191,7 +200,9 @@ class Trainer:
                 loss_total = sum(loss for loss in loss_dict.values())
                 loss = loss_total / accum
 
-            loss_value = float(loss_total.item())
+            loss_dict_reduced = reduce_dict(loss_dict, average=True)
+            loss_total_reduced = sum(v for v in loss_dict_reduced.values())
+            loss_value = float(loss_total_reduced.item())
             if not is_finite_number(loss_value):
                 raise FloatingPointError(f"Non-finite loss detected at epoch={epoch}, iter={i}: loss_total={loss_value}")
 
@@ -210,10 +221,10 @@ class Trainer:
             last_time = time.time()
 
             meter["loss_total"] += loss_value
-            meter["loss_classifier"] += float(loss_dict.get("loss_classifier", torch.tensor(0.0)).item())
-            meter["loss_box_reg"] += float(loss_dict.get("loss_box_reg", torch.tensor(0.0)).item())
-            meter["loss_objectness"] += float(loss_dict.get("loss_objectness", torch.tensor(0.0)).item())
-            meter["loss_rpn_box_reg"] += float(loss_dict.get("loss_rpn_box_reg", torch.tensor(0.0)).item())
+            meter["loss_classifier"] += float(loss_dict_reduced.get("loss_classifier", torch.tensor(0.0)).item())
+            meter["loss_box_reg"] += float(loss_dict_reduced.get("loss_box_reg", torch.tensor(0.0)).item())
+            meter["loss_objectness"] += float(loss_dict_reduced.get("loss_objectness", torch.tensor(0.0)).item())
+            meter["loss_rpn_box_reg"] += float(loss_dict_reduced.get("loss_rpn_box_reg", torch.tensor(0.0)).item())
 
             lr = self.optimizer.param_groups[0]["lr"]
             print_freq = int(self.cfg["RUNTIME"].get("PRINT_FREQ", self.cfg["TRAIN"].get("PRINT_FREQ", 20)))
@@ -235,20 +246,22 @@ class Trainer:
                     f"data_time={data_time:.3f}s iter_time={iter_time:.3f}s eta={eta_sec/60:.1f}m "
                     + (f"gpu_memory={gpu_mem:.1f}MB" if self.cfg["LOG"].get("LOG_MEMORY", True) else "gpu_memory=disabled")
                 )
-                self.logger.info(msg)
+                if is_main_process():
+                    self.logger.info(msg)
 
             global_step = epoch * iters + i
             if self.cfg["LOG"].get("LOG_ITER_LOSS", True):
                 iter_scalars = {
                     "loss_total": loss_value,
-                    "loss_classifier": float(loss_dict.get("loss_classifier", torch.tensor(0.0)).item()),
-                    "loss_box_reg": float(loss_dict.get("loss_box_reg", torch.tensor(0.0)).item()),
-                    "loss_objectness": float(loss_dict.get("loss_objectness", torch.tensor(0.0)).item()),
-                    "loss_rpn_box_reg": float(loss_dict.get("loss_rpn_box_reg", torch.tensor(0.0)).item()),
+                    "loss_classifier": float(loss_dict_reduced.get("loss_classifier", torch.tensor(0.0)).item()),
+                    "loss_box_reg": float(loss_dict_reduced.get("loss_box_reg", torch.tensor(0.0)).item()),
+                    "loss_objectness": float(loss_dict_reduced.get("loss_objectness", torch.tensor(0.0)).item()),
+                    "loss_rpn_box_reg": float(loss_dict_reduced.get("loss_rpn_box_reg", torch.tensor(0.0)).item()),
                 }
                 if self.cfg["LOG"].get("LOG_LR", True):
                     iter_scalars["lr"] = lr
-                self.logger.log_scalars("train_iter", iter_scalars, global_step)
+                if is_main_process():
+                    self.logger.log_scalars("train_iter", iter_scalars, global_step)
 
         epoch_time = time.time() - epoch_start
         avg = {
@@ -261,12 +274,14 @@ class Trainer:
             "current_lr": self.optimizer.param_groups[0]["lr"],
             "best_metric_so_far": self.best_metric,
         }
-        self.logger.info(f"epoch={epoch} summary={avg}")
+        if is_main_process():
+            self.logger.info(f"epoch={epoch} summary={avg}")
         if self.cfg["LOG"].get("LOG_EPOCH_LOSS", True):
             epoch_scalars = dict(avg)
             if not self.cfg["LOG"].get("LOG_LR", True):
                 epoch_scalars.pop("current_lr", None)
-            self.logger.log_scalars("train_epoch", epoch_scalars, epoch)
+            if is_main_process():
+                self.logger.log_scalars("train_epoch", epoch_scalars, epoch)
         return avg
 
     def validate(self, epoch):
@@ -276,7 +291,8 @@ class Trainer:
         out_dir = os.path.join(self.output_dir, "eval", f"epoch_{epoch:03d}")
         metrics, per_class_ap = self.evaluator.evaluate(self.model, self.val_loader, self.device, output_dir=out_dir)
         scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, (int, float))}
-        self.logger.log_scalars("val", scalar_metrics, epoch)
-        if per_class_ap:
+        if is_main_process():
+            self.logger.log_scalars("val", scalar_metrics, epoch)
+        if per_class_ap and is_main_process():
             self.logger.info(f"epoch={epoch} per-class AP rows={len(per_class_ap)}")
         return metrics
