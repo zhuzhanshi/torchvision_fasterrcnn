@@ -84,6 +84,47 @@ python infer.py --config configs/fasterrcnn_resnet50_fpn.py --weights /path/to/m
 - `MODEL.NUM_CLASSES`：前景类别数（不含背景）
 - 背景类由模型构建器内部自动 `+1` 处理。
 
+## 数据集组织与类别约定（VOC/COCO）
+
+- `DATASET.CLASSES`：前景类别名列表（不包含背景）。
+- `DATASET.NUM_CLASSES`：前景类别数量，必须与 `len(CLASSES)` 一致。
+- 训练内部标签约定：`background=0`，前景类从 `1` 开始；VOC/COCO 都会 remap 到这一统一体系。
+- `DATASET.TRAIN_SPLIT / VAL_SPLIT / TEST_SPLIT` 控制三套数据集构建，`datasets/builder.py` 会统一读取。
+
+### VOC
+
+```text
+ROOT/
+├── Annotations/
+├── JPEGImages/
+└── ImageSets/Main/
+    ├── train.txt
+    ├── val.txt
+    └── test.txt
+```
+
+### COCO
+
+```text
+ROOT/
+├── train2017/ (or train)
+├── val2017/   (or val)
+├── test2017/  (or test)
+└── annotations/
+    ├── instances_train2017.json
+    ├── instances_val2017.json
+    └── instances_test2017.json
+```
+
+可通过 `TRAIN_SPLIT/VAL_SPLIT/TEST_SPLIT` 改成 `train2017/val2017/test2017` 等真实目录名。
+
+### 常用数据过滤配置
+
+- `DATASET.FILTER_EMPTY_GT`：训练集过滤空标注图像
+- `DATASET.MIN_BOX_AREA`：过滤过小框
+- `DATASET.IGNORE_DIFFICULT`：VOC 中忽略 difficult 目标
+- `DATASET.CHECK_DATASET`：启用更严格的文件存在性检查
+
 ### RESUME 与 WEIGHTS 的语义
 
 - `RESUME`：恢复完整训练状态（model + optimizer + scheduler + scaler + epoch）

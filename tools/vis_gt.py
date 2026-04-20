@@ -11,7 +11,7 @@ from utils.visualize import draw_predictions
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
-    parser.add_argument("--split", default="train")
+    parser.add_argument("--split", default="train", choices=["train", "val", "test"])
     parser.add_argument("--num_samples", type=int, default=20)
     parser.add_argument("--output_dir", default="vis_gt")
     args = parser.parse_args()
@@ -25,7 +25,15 @@ def main():
         from torchvision.transforms.functional import to_pil_image
 
         img = to_pil_image(image_t)
-        vis = draw_predictions(img, target["boxes"].tolist(), target["labels"].tolist(), [1.0] * len(target["labels"]), cfg["DATASET"]["CLASSES"])
+        labels = target.get("labels", [])
+        scores = [1.0] * len(labels)
+        vis = draw_predictions(
+            img,
+            target.get("boxes", []).tolist() if hasattr(target.get("boxes", []), "tolist") else [],
+            labels.tolist() if hasattr(labels, "tolist") else [],
+            scores,
+            cfg["DATASET"]["CLASSES"],
+        )
         vis.save(os.path.join(args.output_dir, f"{i:04d}.jpg"))
 
 

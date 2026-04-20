@@ -26,6 +26,9 @@ CFG = {
     "DATASET": {
         "TYPE": "voc",  # voc | coco
         "ROOT": "data",
+        # split names:
+        # - VOC: usually train / val / test (ImageSets/Main/<split>.txt)
+        # - COCO: usually train2017 / val2017 / test2017 (images/<split>, annotations/instances_<split>.json)
         "TRAIN_SPLIT": "train",
         "VAL_SPLIT": "val",
         "TEST_SPLIT": "test",

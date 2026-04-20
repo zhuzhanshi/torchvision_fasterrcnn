@@ -20,10 +20,15 @@ def main():
     invalid_bbox = 0
     out_of_bounds = 0
     invalid_label = 0
+    missing_fields = 0
     cls_count = Counter()
 
     for i in range(len(ds)):
         image, target = ds[i]
+        if any(k not in target for k in ["boxes", "labels", "image_id", "area", "iscrowd"]):
+            missing_fields += 1
+            continue
+
         h, w = image.shape[-2:]
         boxes = target["boxes"]
         labels = target["labels"]
@@ -44,6 +49,7 @@ def main():
 
     print("=== Dataset Check Report ===")
     print(f"split={args.split}, total={len(ds)}")
+    print(f"missing_required_target_fields={missing_fields}")
     print(f"num_empty={num_empty}")
     print(f"invalid_bbox={invalid_bbox}")
     print(f"out_of_bounds={out_of_bounds}")
