@@ -1,0 +1,245 @@
+from copy import deepcopy
+
+
+CFG = {
+    "RUNTIME": {
+        "MODE": "train",  # train | test | infer
+        "EXP_NAME": "default_exp",
+        "OUTPUT_ROOT": "outputs",
+        "EXISTING_OUTPUT_DIR": "",  # optional: reuse an existing experiment directory (mainly for test/infer)
+        "SEED": 42,
+        "DEVICE": "cuda",
+        "GPU_IDS": [],
+        "NUM_WORKERS": 4,
+        "PIN_MEMORY": True,
+        "CUDNN_BENCHMARK": False,
+        "DETERMINISTIC": False,
+        "USE_AMP": True,
+        "RESUME": "",  # resume full training state
+        "WEIGHTS": "",  # load model-only weights
+        "AUTO_RESUME": False,
+        "PRINT_FREQ": 20,
+        "SAVE_EVERY_EPOCH": True,
+        "SAVE_INTERVAL": 1,
+        "SAVE_BEST_ONLY": False,
+        "EVAL_BEFORE_TRAIN": False,
+    },
+    "DATASET": {
+        "TYPE": "voc",  # voc | coco
+        "ROOT": "data",
+        # split names:
+        # - VOC: usually train / val / test (ImageSets/Main/<split>.txt)
+        # - COCO: usually train2017 / val2017 / test2017 (images/<split>, annotations/instances_<split>.json)
+        "TRAIN_SPLIT": "train",
+        "VAL_SPLIT": "val",
+        "TEST_SPLIT": "test",
+        "CLASSES": ["class1"],
+        "NUM_CLASSES": 1,  # foreground only, no background
+        "FILTER_EMPTY_GT": False,
+        "MIN_BOX_AREA": 0.0,
+        "IGNORE_DIFFICULT": False,
+        "CHECK_DATASET": False,
+        # backward-compatible aliases
+        "DATA_ROOT": "data",
+        "ALLOW_EMPTY": False,
+    },
+    "INPUT": {
+        "IMAGE_FORMAT": "RGB",
+        "MIN_SIZE": 800,
+        "MAX_SIZE": 1333,
+        "IMAGE_MEAN": [0.485, 0.456, 0.406],
+        "IMAGE_STD": [0.229, 0.224, 0.225],
+        "TO_TENSOR": True,
+        "NORMALIZE": True,
+        # backward-compatible aliases
+        "MEAN": [0.485, 0.456, 0.406],
+        "STD": [0.229, 0.224, 0.225],
+    },
+    "AUG": {
+        "TRAIN": {
+            "ENABLE": True,
+            "HFLIP_PROB": 0.5,
+            "VFLIP_PROB": 0.0,
+            "COLOR_JITTER": {
+                "ENABLED": False,
+                "BRIGHTNESS": 0.2,
+                "CONTRAST": 0.2,
+                "SATURATION": 0.2,
+                "HUE": 0.02,
+            },
+            "RANDOM_RESIZE": {
+                "ENABLED": True,
+                "SCALES": [640, 672, 704, 736, 768, 800],
+                "MAX_SIZE": 1333,
+            },
+            "RANDOM_CROP": {"ENABLED": False, "SIZE": [640, 640]},
+            "RANDOM_ROTATE": {"ENABLED": False, "DEGREES": 0},
+        },
+        "TEST": {
+            "ENABLE": True,
+            "RESIZE": {"ENABLED": False, "MIN_SIZE": 800, "MAX_SIZE": 1333},
+        },
+        # backward-compatible aliases
+        "HFLIP_PROB": 0.5,
+        "VFLIP_PROB": 0.0,
+        "COLOR_JITTER": {
+            "ENABLED": False,
+            "BRIGHTNESS": 0.2,
+            "CONTRAST": 0.2,
+            "SATURATION": 0.2,
+            "HUE": 0.02,
+        },
+        "RANDOM_RESIZE": {
+            "ENABLED": True,
+            "SCALES": [640, 672, 704, 736, 768, 800],
+            "MAX_SIZE": 1333,
+        },
+    },
+    "DATALOADER": {
+        "TRAIN_BATCH_SIZE": 2,
+        "VAL_BATCH_SIZE": 2,
+        "TEST_BATCH_SIZE": 2,
+        "SHUFFLE": True,
+        "DROP_LAST": False,
+        "ASPECT_RATIO_GROUPING": False,
+        # backward-compatible aliases
+        "BATCH_SIZE": 2,
+        "NUM_WORKERS": 4,
+        "PIN_MEMORY": True,
+    },
+    "MODEL": {
+        "NAME": "fasterrcnn_resnet50_fpn",
+        "NUM_CLASSES": 1,  # foreground only, no background
+        "PRETRAINED": True,
+        "WEIGHTS": "DEFAULT",
+        "WEIGHTS_BACKBONE": "DEFAULT",
+        "TRAINABLE_BACKBONE_LAYERS": 3,
+        "FREEZE_BACKBONE": False,
+        "FREEZE_BACKBONE_AT": 0,
+        "REPLACE_HEAD": True,
+        "MIN_SIZE": 800,
+        "MAX_SIZE": 1333,
+        "IMAGE_MEAN": [0.485, 0.456, 0.406],
+        "IMAGE_STD": [0.229, 0.224, 0.225],
+        "CUSTOM_WEIGHTS": "",
+        "RPN": {
+            "USE_CUSTOM": True,
+            "ANCHOR_SIZES": [[32], [64], [128], [256], [512]],
+            "ASPECT_RATIOS": [[0.5, 1.0, 2.0]] * 5,
+            "PRE_NMS_TOP_N_TRAIN": 2000,
+            "PRE_NMS_TOP_N_TEST": 1000,
+            "POST_NMS_TOP_N_TRAIN": 2000,
+            "POST_NMS_TOP_N_TEST": 1000,
+            "NMS_THRESH": 0.7,
+            "FG_IOU_THRESH": 0.7,
+            "BG_IOU_THRESH": 0.3,
+            "BATCH_SIZE_PER_IMAGE": 256,
+            "POSITIVE_FRACTION": 0.5,
+            "SCORE_THRESH": 0.0,
+        },
+        "ROI_HEADS": {
+            "BOX_SCORE_THRESH": 0.05,
+            "BOX_NMS_THRESH": 0.5,
+            "BOX_DETECTIONS_PER_IMG": 100,
+            "BOX_FG_IOU_THRESH": 0.5,
+            "BOX_BG_IOU_THRESH": 0.5,
+            "BATCH_SIZE_PER_IMAGE": 512,
+            "POSITIVE_FRACTION": 0.25,
+            # backward-compatible aliases
+            "SCORE_THRESH": 0.05,
+            "NMS_THRESH": 0.5,
+            "DETECTIONS_PER_IMG": 100,
+            "FG_IOU_THRESH": 0.5,
+            "BG_IOU_THRESH": 0.5,
+        },
+    },
+    "OPTIMIZER": {
+        "NAME": "sgd",
+        "LR": 0.005,
+        "MOMENTUM": 0.9,
+        "WEIGHT_DECAY": 0.0005,
+        "BETAS": [0.9, 0.999],
+        "EPS": 1e-8,
+    },
+    "SCHEDULER": {
+        "NAME": "multistep",
+        "STEP_SIZE": 1,
+        "GAMMA": 0.1,
+        "MILESTONES": [8, 11],
+        "T_MAX": 12,
+        "ETA_MIN": 1e-6,
+        "WARMUP": {"ENABLED": False, "ITERS": 0, "FACTOR": 0.1},
+    },
+    "TRAIN": {
+        "EPOCHS": 12,
+        "START_EPOCH": 0,
+        "GRAD_CLIP": {
+            "ENABLE": False,
+            "MAX_NORM": 0.0,
+            "NORM_TYPE": 2.0,
+        },
+        "ACCUMULATION_STEPS": 1,
+        "EMPTY_CACHE_PER_EPOCH": False,
+        "VALIDATE_EVERY_EPOCH": 1,
+        "SAVE_BEST_METRIC": "mAP",
+        # backward-compatible aliases
+        "AMP": True,
+        "GRAD_CLIP_NORM": 0.0,
+        "VAL_EVERY_EPOCH": 1,
+        "PRINT_FREQ": 20,
+        "RESUME": "",
+    },
+    "EVAL": {
+        "ENABLE": True,
+        "INTERVAL": 1,
+        "METRIC": "bbox",
+        "SAVE_PREDICTIONS": True,
+        "SAVE_GT": False,
+        "USE_COCO_EVAL": True,
+        "SCORE_THRESH": 0.05,
+        "MAX_DETS": 100,
+        "PER_CLASS_AP": True,
+        "VISUALIZE": False,
+        "VIS_MAX_SAMPLES": 20,
+        # backward-compatible aliases
+        "ENABLED": True,
+        "IOU_TYPE": "bbox",
+    },
+    "INFER": {
+        "INPUT_PATH": "",
+        "OUTPUT_DIR": "",
+        "RECURSIVE": False,
+        "SAVE_VIS": True,
+        "SAVE_TXT": False,
+        "SAVE_JSON": True,
+        "DRAW_LABEL": True,
+        "DRAW_SCORE": True,
+        "LINE_THICKNESS": 2,
+        "SCORE_THRESH": 0.5,
+        "NMS_THRESH": 0.5,
+        "MAX_DETS": 100,
+        "CLASS_FILTER": [],  # supports class name or label id (foreground starts at 1)
+    },
+    "LOG": {
+        "TXT": True,
+        "TENSORBOARD": True,
+        "JSON": False,
+        "TXT_FILENAME": "train.log",
+        "JSON_LOG_FILENAME": "events.jsonl",
+        "ENV_FILENAME": "env.txt",
+        "LOG_ITER_LOSS": True,
+        "LOG_EPOCH_LOSS": True,
+        "LOG_LR": True,
+        "LOG_MEMORY": True,
+        "LOG_TIME": True,
+        "LOG_GRAD_NORM": False,
+        "LOG_MODEL_STRUCTURE": False,
+        "SAVE_CONFIG_SNAPSHOT": True,
+        "SAVE_ENV_INFO": True,
+        "LOG_DIR_NAME": "tb",
+    },
+}
+
+
+def get_cfg_defaults():
+    return deepcopy(CFG)
