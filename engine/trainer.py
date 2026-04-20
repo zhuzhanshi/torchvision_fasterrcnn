@@ -23,12 +23,12 @@ class Trainer:
         self.device = device
         self.logger = logger
         self.output_dir = output_dir
-        self.scaler = GradScaler(enabled=cfg["TRAIN"].get("AMP", True) and device.type == "cuda")
+        self.scaler = GradScaler(enabled=cfg["RUNTIME"].get("USE_AMP", cfg["TRAIN"].get("AMP", True)) and device.type == "cuda")
         self.best_metric = -1.0
         self.start_epoch = 0
         self.evaluator = Evaluator(cfg, logger=logger)
 
-        resume_path = cfg["TRAIN"].get("RESUME", "")
+        resume_path = cfg["RUNTIME"].get("RESUME", cfg["TRAIN"].get("RESUME", ""))
         if resume_path:
             self.resume(resume_path)
 
@@ -67,7 +67,7 @@ class Trainer:
         total_epochs = self.cfg["TRAIN"]["EPOCHS"]
         for epoch in range(self.start_epoch, total_epochs):
             self.train_one_epoch(epoch)
-            do_val = self.val_loader is not None and (epoch + 1) % self.cfg["TRAIN"].get("VAL_EVERY_EPOCH", 1) == 0
+            do_val = self.val_loader is not None and (epoch + 1) % self.cfg["TRAIN"].get("VALIDATE_EVERY_EPOCH", self.cfg["TRAIN"].get("VAL_EVERY_EPOCH", 1)) == 0
             metric_value = None
             if do_val:
                 metrics = self.validate(epoch)
@@ -85,7 +85,7 @@ class Trainer:
         meter = defaultdict(float)
         iters = len(self.train_loader)
         accum = max(1, self.cfg["TRAIN"].get("ACCUMULATION_STEPS", 1))
-        grad_clip = self.cfg["TRAIN"].get("GRAD_CLIP_NORM", 0.0)
+        grad_clip = self.cfg["TRAIN"].get("GRAD_CLIP", self.cfg["TRAIN"].get("GRAD_CLIP_NORM", 0.0))
 
         self.optimizer.zero_grad(set_to_none=True)
         epoch_start = time.time()
@@ -114,7 +114,7 @@ class Trainer:
             for k, v in loss_dict.items():
                 meter[k] += float(v.item())
 
-            if (i + 1) % self.cfg["TRAIN"].get("PRINT_FREQ", 20) == 0:
+            if (i + 1) % self.cfg["RUNTIME"].get("PRINT_FREQ", self.cfg["TRAIN"].get("PRINT_FREQ", 20)) == 0:
                 avg_total = meter["loss_total"] / (i + 1)
                 lr = self.optimizer.param_groups[0]["lr"]
                 eta_sec = (iters - i - 1) * (time.time() - epoch_start) / max(1, i + 1)

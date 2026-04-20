@@ -101,15 +101,23 @@ class RandomResize:
 
 
 def build_transforms(cfg: Dict, is_train: bool = True) -> Callable:
+    input_cfg = cfg["INPUT"]
+    aug_cfg = cfg["AUG"]
+    train_aug = aug_cfg.get("TRAIN", aug_cfg)
+
     t = [ToTensor()]
-    if is_train:
-        rr_cfg = cfg["AUG"]["RANDOM_RESIZE"]
+    if is_train and train_aug.get("ENABLE", True):
+        rr_cfg = train_aug.get("RANDOM_RESIZE", aug_cfg.get("RANDOM_RESIZE", {}))
         if rr_cfg.get("ENABLED", False):
-            t.append(RandomResize(rr_cfg.get("SCALES", [cfg["INPUT"]["MIN_SIZE"]]), rr_cfg.get("MAX_SIZE", cfg["INPUT"]["MAX_SIZE"])))
-        t.append(RandomHorizontalFlip(cfg["AUG"].get("HFLIP_PROB", 0.5)))
-        t.append(RandomVerticalFlip(cfg["AUG"].get("VFLIP_PROB", 0.0)))
-        cj = cfg["AUG"].get("COLOR_JITTER", {})
+            t.append(RandomResize(rr_cfg.get("SCALES", [input_cfg["MIN_SIZE"]]), rr_cfg.get("MAX_SIZE", input_cfg["MAX_SIZE"])))
+        t.append(RandomHorizontalFlip(train_aug.get("HFLIP_PROB", aug_cfg.get("HFLIP_PROB", 0.5))))
+        t.append(RandomVerticalFlip(train_aug.get("VFLIP_PROB", aug_cfg.get("VFLIP_PROB", 0.0))))
+        cj = train_aug.get("COLOR_JITTER", aug_cfg.get("COLOR_JITTER", {}))
         if cj.get("ENABLED", False):
             t.append(ColorJitter(cj["BRIGHTNESS"], cj["CONTRAST"], cj["SATURATION"], cj["HUE"]))
-    t.append(Normalize(cfg["INPUT"]["MEAN"], cfg["INPUT"]["STD"]))
+
+    if input_cfg.get("NORMALIZE", True):
+        mean = input_cfg.get("IMAGE_MEAN", input_cfg.get("MEAN"))
+        std = input_cfg.get("IMAGE_STD", input_cfg.get("STD"))
+        t.append(Normalize(mean, std))
     return Compose(t)

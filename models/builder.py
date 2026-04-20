@@ -89,7 +89,8 @@ def build_model(cfg: Dict):
     )
 
     model = model_fn(**kwargs)
-    model = replace_box_predictor(model, cfg["DATASET"]["NUM_CLASSES"] + 1)
+    fg_classes = cfg["MODEL"].get("NUM_CLASSES", cfg["DATASET"]["NUM_CLASSES"])
+    model = replace_box_predictor(model, fg_classes + 1)
     model = apply_freeze_strategy(model, cfg)
 
     custom_weights = cfg["MODEL"].get("CUSTOM_WEIGHTS", "")
