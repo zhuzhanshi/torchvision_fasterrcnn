@@ -116,9 +116,13 @@ def build_runtime(cfg, args):
 
     if cfg["RUNTIME"].get("RESUME") and cfg["RUNTIME"].get("WEIGHTS"):
         logger.info("Both RUNTIME.RESUME and RUNTIME.WEIGHTS are set. Resume state will take precedence once Trainer resumes.")
+    if cfg["RUNTIME"].get("MODE") == "infer" and cfg["RUNTIME"].get("RESUME"):
+        logger.warning("RUNTIME.RESUME is ignored in infer mode. Please use RUNTIME.WEIGHTS/--weights for inference.")
 
     # weights: model-only load for train/test/infer
     if cfg["RUNTIME"].get("WEIGHTS"):
+        if not os.path.isfile(cfg["RUNTIME"]["WEIGHTS"]):
+            raise FileNotFoundError(f"RUNTIME.WEIGHTS file not found: {cfg['RUNTIME']['WEIGHTS']}")
         load_info = load_model_weights(model, cfg["RUNTIME"]["WEIGHTS"], strict=False)
         logger.info(
             f"Loaded model weights from {cfg['RUNTIME']['WEIGHTS']} (strict=False). "
@@ -162,4 +166,5 @@ def run_test(ctx: RuntimeContext):
 
 def run_infer(ctx: RuntimeContext):
     inferencer = Inferencer(ctx.cfg, ctx.logger)
-    inferencer.run(ctx.model, ctx.device, output_dir=os.path.join(ctx.output_dir, "infer"))
+    out_dir = ctx.cfg["INFER"].get("OUTPUT_DIR") or os.path.join(ctx.output_dir, "infer")
+    inferencer.run(ctx.model, ctx.device, output_dir=out_dir)

@@ -211,10 +211,13 @@ CFG = {
         "SAVE_VIS": True,
         "SAVE_TXT": False,
         "SAVE_JSON": True,
+        "DRAW_LABEL": True,
+        "DRAW_SCORE": True,
+        "LINE_THICKNESS": 2,
         "SCORE_THRESH": 0.5,
         "NMS_THRESH": 0.5,
         "MAX_DETS": 100,
-        "CLASS_FILTER": [],
+        "CLASS_FILTER": [],  # supports class name or label id (foreground starts at 1)
     },
     "LOG": {
         "TXT": True,

@@ -224,3 +224,43 @@ outputs/{model_name}/{exp_name}/{timestamp}/
 ### 依赖说明
 
 - COCO 风格评估依赖 `pycocotools`（已在 `requirements.txt` 中声明）。
+
+## 推理流程（Inferencer）
+
+- 推理统一由 `engine/inferencer.py` 的 `Inferencer` 执行；`infer.py` 保持薄入口。  
+- `runner` 仅负责装配模型/日志/输出目录，推理后处理与结果保存都在 Inferencer 内完成。
+
+### 输入形式
+
+- `INFER.INPUT_PATH` / `--input-path` 支持：
+  - 单图路径
+  - 文件夹路径
+- 文件夹默认非递归；若 `INFER.RECURSIVE=true` 则递归扫描子目录。
+- 支持后缀：`.jpg/.jpeg/.png/.bmp/.webp`。
+
+### 推理输出目录
+
+统一保存到：
+
+```text
+outputs/{model_name}/{exp_name}/{timestamp}/infer/
+├── vis/
+├── json/
+├── txt/
+└── predictions_all.json
+```
+
+- `INFER.SAVE_VIS`：是否保存可视化图到 `infer/vis/`
+- `INFER.SAVE_JSON`：是否保存每图结构化结果到 `infer/json/`
+- `INFER.SAVE_TXT`：是否保存每图文本结果到 `infer/txt/`
+- `predictions_all.json`：总汇总（成功/失败计数 + 所有结果）
+
+### 后处理与可视化配置
+
+- `INFER.SCORE_THRESH`：置信度阈值
+- `INFER.MAX_DETS`：每图最大输出框数
+- `INFER.NMS_THRESH`：覆盖模型 ROI NMS 阈值（infer-time）
+- `INFER.CLASS_FILTER`：可按**类别名**或**label id**过滤（前景从 1 开始）
+- `INFER.DRAW_LABEL / DRAW_SCORE / LINE_THICKNESS`：可视化标注控制
+
+> 说明：`INFER.*` 与 `EVAL.*` 参数独立，推理不会读取 `EVAL` 阈值配置。
