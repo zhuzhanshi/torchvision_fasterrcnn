@@ -113,9 +113,17 @@ def build_runtime(cfg, args):
     device = torch.device(cfg["RUNTIME"].get("DEVICE", "cuda" if torch.cuda.is_available() else "cpu"))
 
     model = build_model(cfg).to(device)
+
+    if cfg["RUNTIME"].get("RESUME") and cfg["RUNTIME"].get("WEIGHTS"):
+        logger.info("Both RUNTIME.RESUME and RUNTIME.WEIGHTS are set. Resume state will take precedence once Trainer resumes.")
+
     # weights: model-only load for train/test/infer
     if cfg["RUNTIME"].get("WEIGHTS"):
-        load_model_weights(model, cfg["RUNTIME"]["WEIGHTS"], strict=False)
+        load_info = load_model_weights(model, cfg["RUNTIME"]["WEIGHTS"], strict=False)
+        logger.info(
+            f"Loaded model weights from {cfg['RUNTIME']['WEIGHTS']} (strict=False). "
+            f"missing={len(load_info['missing_keys'])}, unexpected={len(load_info['unexpected_keys'])}"
+        )
 
     return RuntimeContext(cfg=cfg, args=args, output_dir=output_dir, logger=logger, device=device, model=model)
 

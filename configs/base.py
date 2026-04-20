@@ -119,6 +119,7 @@ CFG = {
         "IMAGE_STD": [0.229, 0.224, 0.225],
         "CUSTOM_WEIGHTS": "",
         "RPN": {
+            "USE_CUSTOM": True,
             "ANCHOR_SIZES": [[32], [64], [128], [256], [512]],
             "ASPECT_RATIOS": [[0.5, 1.0, 2.0]] * 5,
             "PRE_NMS_TOP_N_TRAIN": 2000,
@@ -130,15 +131,22 @@ CFG = {
             "BG_IOU_THRESH": 0.3,
             "BATCH_SIZE_PER_IMAGE": 256,
             "POSITIVE_FRACTION": 0.5,
+            "SCORE_THRESH": 0.0,
         },
         "ROI_HEADS": {
+            "BOX_SCORE_THRESH": 0.05,
+            "BOX_NMS_THRESH": 0.5,
+            "BOX_DETECTIONS_PER_IMG": 100,
+            "BOX_FG_IOU_THRESH": 0.5,
+            "BOX_BG_IOU_THRESH": 0.5,
+            "BATCH_SIZE_PER_IMAGE": 512,
+            "POSITIVE_FRACTION": 0.25,
+            # backward-compatible aliases
             "SCORE_THRESH": 0.05,
             "NMS_THRESH": 0.5,
             "DETECTIONS_PER_IMG": 100,
             "FG_IOU_THRESH": 0.5,
             "BG_IOU_THRESH": 0.5,
-            "BATCH_SIZE_PER_IMAGE": 512,
-            "POSITIVE_FRACTION": 0.25,
         },
     },
     "OPTIMIZER": {

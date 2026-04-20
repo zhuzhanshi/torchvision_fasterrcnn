@@ -5,6 +5,7 @@ def get_cfg():
     cfg = get_cfg_defaults()
     cfg["RUNTIME"]["EXP_NAME"] = "frcnn_mbv3_320_fpn"
     cfg["MODEL"]["NAME"] = "fasterrcnn_mobilenet_v3_large_320_fpn"
+    cfg["MODEL"]["PRETRAINED"] = True
     cfg["MODEL"]["WEIGHTS"] = "DEFAULT"
     cfg["MODEL"]["WEIGHTS_BACKBONE"] = "DEFAULT"
     cfg["MODEL"]["TRAINABLE_BACKBONE_LAYERS"] = 6

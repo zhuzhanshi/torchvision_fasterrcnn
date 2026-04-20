@@ -69,6 +69,15 @@ python infer.py --config configs/fasterrcnn_resnet50_fpn.py --weights /path/to/m
 - `INFER`
 - `LOG`
 
+### 支持的 Faster R-CNN 结构（`MODEL.NAME`）
+
+- `fasterrcnn_resnet50_fpn`
+- `fasterrcnn_resnet50_fpn_v2`
+- `fasterrcnn_mobilenet_v3_large_fpn`
+- `fasterrcnn_mobilenet_v3_large_320_fpn`
+
+可通过 `--config configs/<model_preset>.py` 切换。
+
 ### NUM_CLASSES 约定
 
 - `DATASET.NUM_CLASSES`：前景类别数（不含背景）
@@ -78,7 +87,9 @@ python infer.py --config configs/fasterrcnn_resnet50_fpn.py --weights /path/to/m
 ### RESUME 与 WEIGHTS 的语义
 
 - `RESUME`：恢复完整训练状态（model + optimizer + scheduler + scaler + epoch）
-- `WEIGHTS`：仅加载模型参数（微调/测试/推理）
+- `WEIGHTS`：仅加载模型参数（微调/测试/推理，不恢复 optimizer/scheduler/scaler）
+
+> 建议：训练中断续训使用 `RESUME`；评估/推理或迁移学习初始化使用 `WEIGHTS`。
 
 ## Config Snapshot
 
