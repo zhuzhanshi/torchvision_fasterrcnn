@@ -156,7 +156,8 @@ def run_train(ctx: RuntimeContext):
 def run_test(ctx: RuntimeContext):
     _, loaders = build_dataloaders(ctx.cfg, mode="test")
     evaluator = Evaluator(ctx.cfg, ctx.logger)
-    evaluator.evaluate(ctx.model, loaders["test"], ctx.device, output_dir=os.path.join(ctx.output_dir, "eval", "test"))
+    metrics, _ = evaluator.evaluate(ctx.model, loaders["test"], ctx.device, output_dir=os.path.join(ctx.output_dir, "eval", "test"))
+    ctx.logger.info(f"Test evaluation completed. metrics={metrics}")
 
 
 def run_infer(ctx: RuntimeContext):

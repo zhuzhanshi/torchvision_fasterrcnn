@@ -183,3 +183,44 @@ outputs/{model_name}/{exp_name}/{timestamp}/
 ├── eval/
 └── infer/
 ```
+
+## 验证 / 测试评估口径（Evaluator）
+
+- 评估统一由 `engine/evaluator.py` 的 `Evaluator` 执行：
+  - `test.py` 仅是薄入口，实际评估由 `main.py -> engine/runner.py -> Evaluator` 调用。
+  - `trainer.validate()` 与 `test` 模式复用同一套 `Evaluator.evaluate()` 逻辑。
+- 当前默认评估指标为 `EVAL.METRIC="bbox"`，基于 COCO 风格统计：
+  - `map`（mAP@[0.5:0.95]）
+  - `map50`
+  - `map75`
+  - `ar`
+  - 可选 `per_class_ap`（`EVAL.PER_CLASS_AP=true`）
+
+### EVAL 关键配置
+
+- `EVAL.ENABLE`：训练期间是否启用周期验证
+- `EVAL.INTERVAL`：训练中验证间隔（epoch）
+- `EVAL.SCORE_THRESH`：评估阶段预测分数阈值（仅评估链路）
+- `EVAL.MAX_DETS`：评估阶段每图最多保留框数
+- `EVAL.SAVE_PREDICTIONS`：保存 `predictions.json`
+- `EVAL.SAVE_GT`：保存 `ground_truth.json`
+- `EVAL.PER_CLASS_AP`：输出 per-class AP
+- `EVAL.USE_COCO_EVAL`：是否使用 COCO 风格 bbox 评估（当前要求为 `true`）
+
+> 说明：`EVAL.*` 与 `INFER.*` 分离；评估不会读取 `INFER.SCORE_THRESH / INFER.MAX_DETS`。
+
+### 评估结果保存位置
+
+- **train 周期验证**：`eval/epoch_{xxx}/`
+- **test 模式**：`eval/test/`
+
+每次评估至少产出：
+
+- `metrics.json`
+- `per_class_ap.csv` / `per_class_ap.json`（启用 per-class AP 时）
+- `predictions.json`（`EVAL.SAVE_PREDICTIONS=true`）
+- `ground_truth.json`（`EVAL.SAVE_GT=true`）
+
+### 依赖说明
+
+- COCO 风格评估依赖 `pycocotools`（已在 `requirements.txt` 中声明）。

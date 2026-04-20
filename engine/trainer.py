@@ -104,16 +104,19 @@ class Trainer:
         for epoch in range(self.start_epoch, total_epochs):
             train_stats = self.train_one_epoch(epoch)
 
-            do_val = self.val_loader is not None and (
-                (epoch + 1)
-                % int(self.cfg["TRAIN"].get("VALIDATE_EVERY_EPOCH", self.cfg["TRAIN"].get("VAL_EVERY_EPOCH", 1)))
-                == 0
+            eval_enabled = bool(self.cfg["EVAL"].get("ENABLE", self.cfg["EVAL"].get("ENABLED", True)))
+            eval_interval = int(
+                self.cfg["EVAL"].get(
+                    "INTERVAL",
+                    self.cfg["TRAIN"].get("VALIDATE_EVERY_EPOCH", self.cfg["TRAIN"].get("VAL_EVERY_EPOCH", 1)),
+                )
             )
+            do_val = self.val_loader is not None and eval_enabled and ((epoch + 1) % max(eval_interval, 1) == 0)
 
             metric_value = None
             if do_val:
                 metrics = self.validate(epoch)
-                metric_name = self.cfg["TRAIN"].get("SAVE_BEST_METRIC", "mAP")
+                metric_name = self.cfg["TRAIN"].get("SAVE_BEST_METRIC", metrics.get("best_metric_key", "map"))
                 metric_value = float(metrics.get(metric_name, 0.0))
                 if metric_value > self.best_metric:
                     self.best_metric = metric_value
@@ -236,6 +239,9 @@ class Trainer:
             self.logger.warning("validate() called but val_loader is None. Skip validation.")
             return {}
         out_dir = os.path.join(self.output_dir, "eval", f"epoch_{epoch:03d}")
-        metrics, _ = self.evaluator.evaluate(self.model, self.val_loader, self.device, output_dir=out_dir)
-        self.logger.log_scalars("val", metrics, epoch)
+        metrics, per_class_ap = self.evaluator.evaluate(self.model, self.val_loader, self.device, output_dir=out_dir)
+        scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, (int, float))}
+        self.logger.log_scalars("val", scalar_metrics, epoch)
+        if per_class_ap:
+            self.logger.info(f"epoch={epoch} per-class AP rows={len(per_class_ap)}")
         return metrics

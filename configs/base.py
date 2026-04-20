@@ -193,11 +193,13 @@ CFG = {
         "INTERVAL": 1,
         "METRIC": "bbox",
         "SAVE_PREDICTIONS": True,
+        "SAVE_GT": False,
         "USE_COCO_EVAL": True,
         "SCORE_THRESH": 0.05,
         "MAX_DETS": 100,
         "PER_CLASS_AP": True,
         "VISUALIZE": False,
+        "VIS_MAX_SAMPLES": 20,
         # backward-compatible aliases
         "ENABLED": True,
         "IOU_TYPE": "bbox",
