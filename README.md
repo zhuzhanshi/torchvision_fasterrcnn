@@ -2,14 +2,14 @@
 
 一个基于 **PyTorch + torchvision** 的工程化目标检测项目模板，支持 VOC/COCO、自定义训练、测试与推理。
 
-## 目录结构
+## 目录结构（结构相关）
 
-- `main.py`: 统一入口（train/test/infer）
-- `train.py`, `test.py`, `infer.py`: 薄封装入口
-- `configs/`: Python 配置系统
+- `main.py`: 统一入口（参数解析 + mode 调度）
+- `train.py`, `test.py`, `infer.py`: 轻量入口封装（分别固定默认 mode）
+- `configs/`: Python 配置系统（`base.py` + 各模型配置）
 - `models/`: 模型构建与组件
 - `datasets/`: 数据集、变换、dataloader
-- `engine/`: Trainer / Evaluator / Inferencer
+- `engine/`: `runner.py`（流程编排）+ `trainer/evaluator/inferencer`
 - `utils/`: logger、checkpoint、config、visualize 等
 - `tools/`: 数据检查、导出、可视化工具
 - `outputs/`: 实验输出目录
@@ -47,25 +47,22 @@ data_root/
     └── instances_test.json
 ```
 
-## 训练
+## 运行入口
+
+### 方式 A：统一入口（推荐）
 
 ```bash
-python main.py --config configs/fasterrcnn_resnet50_fpn.py --mode train \
-  --data_root /path/to/data --exp_name exp1 --batch_size 2 --epochs 12
+python main.py --config configs/fasterrcnn_resnet50_fpn.py --mode train --data_root /path/to/data
+python main.py --config configs/fasterrcnn_resnet50_fpn.py --mode test  --data_root /path/to/data --weights /path/to/best.pth
+python main.py --config configs/fasterrcnn_resnet50_fpn.py --mode infer --weights /path/to/best.pth --input_path /path/to/image_or_dir
 ```
 
-## 测试
+### 方式 B：薄封装入口
 
 ```bash
-python main.py --config configs/fasterrcnn_resnet50_fpn.py --mode test \
-  --data_root /path/to/data --weights /path/to/best.pth
-```
-
-## 推理
-
-```bash
-python main.py --config configs/fasterrcnn_resnet50_fpn.py --mode infer \
-  --weights /path/to/best.pth --input_path /path/to/image_or_dir --save_vis true
+python train.py --config configs/fasterrcnn_resnet50_fpn.py --data_root /path/to/data
+python test.py  --config configs/fasterrcnn_resnet50_fpn.py --data_root /path/to/data --weights /path/to/best.pth
+python infer.py --config configs/fasterrcnn_resnet50_fpn.py --weights /path/to/best.pth --input_path /path/to/image_or_dir
 ```
 
 ## 配置说明

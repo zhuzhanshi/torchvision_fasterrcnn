@@ -1,4 +1,7 @@
-from .config import load_config, merge_cli_args, snapshot_config
-from .logger import build_logger
+"""Utility package.
 
-__all__ = ["load_config", "merge_cli_args", "snapshot_config", "build_logger"]
+Avoid importing heavy optional dependencies at package import time.
+Import concrete modules directly, e.g. `from utils.config import load_config`.
+"""
+
+__all__ = []

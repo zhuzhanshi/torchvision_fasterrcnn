@@ -1,4 +1,4 @@
-from .base import get_cfg_defaults
+from configs.base import get_cfg_defaults
 
 
 def get_cfg():
