@@ -15,6 +15,10 @@
 pip install -r requirements.txt
 ```
 
+可选依赖说明：
+- `pycocotools`：COCO 数据集读取与 COCO 风格评估必须。
+- `tensorboard`：仅在 `LOG.TENSORBOARD=true` 时需要；若缺失会自动降级并打印 warning。
+
 ## 运行入口
 
 ### 方式 A：统一入口（推荐）
@@ -31,6 +35,12 @@ python main.py --config configs/fasterrcnn_resnet50_fpn.py --mode infer --weight
 python train.py --config configs/fasterrcnn_resnet50_fpn.py --data-root /path/to/data
 python test.py  --config configs/fasterrcnn_resnet50_fpn.py --data-root /path/to/data --weights /path/to/model_weights.pth
 python infer.py --config configs/fasterrcnn_resnet50_fpn.py --weights /path/to/model_weights.pth --input-path /path/to/image_or_dir
+```
+
+### TensorBoard 启动
+
+```bash
+tensorboard --logdir outputs
 ```
 
 ## 常用 CLI 覆盖项
@@ -278,3 +288,67 @@ outputs/{model_name}/{exp_name}/{timestamp}/infer/
 - `LOG.JSON=true` 时写入 `events.jsonl`（结构化日志与标量记录）。
 - `LOG.SAVE_CONFIG_SNAPSHOT=true` 时保存最终生效配置到 `config_snapshot.py`。
 - `LOG.SAVE_ENV_INFO=true` 时保存环境信息到 `env.txt`（Python/torch/torchvision/CUDA/device）。
+
+## 工具脚本（tools）
+
+主流程入口是 `main.py / train.py / test.py / infer.py`；`tools/` 是辅助排查工具。
+
+### 1) 数据集检查：`tools/check_dataset.py`
+
+```bash
+python tools/check_dataset.py \
+  --config configs/fasterrcnn_resnet50_fpn.py \
+  --split train \
+  --max-samples 1000 \
+  --output-json outputs/check_dataset_train.json
+```
+
+检查项：
+- target 必要字段缺失
+- 空标注样本
+- bbox 宽高非法
+- bbox 越界
+- label 非法
+- 类别计数
+
+### 2) GT 可视化：`tools/vis_gt.py`
+
+```bash
+python tools/vis_gt.py \
+  --config configs/fasterrcnn_resnet50_fpn.py \
+  --split train \
+  --max-samples 50 \
+  --output-dir outputs/vis_gt_train \
+  --disable-train-aug
+```
+
+- 保存可视化图片到 `--output-dir`
+- 同时写出 `meta.json` 便于追踪原样本
+
+### 3) 预测导出：`tools/export_predictions.py`
+
+```bash
+# infer 聚合结果 -> csv
+python tools/export_predictions.py \
+  --input outputs/.../infer/predictions_all.json \
+  --output outputs/.../infer/predictions.csv \
+  --format csv
+
+# eval 预测结果 -> txt
+python tools/export_predictions.py \
+  --input outputs/.../eval/test/predictions.json \
+  --output outputs/.../eval/test/predictions.txt \
+  --format txt
+```
+
+支持输入：
+- `infer/predictions_all.json`
+- `infer/json/*.json`（单图结构化结果）
+- `eval/*/predictions.json`
+
+## 基础排错建议
+
+- 缺少 `pycocotools`：COCO 数据集和评估不可用，请先安装 requirements。
+- 缺少 `tensorboard`：训练仍可运行，但不会写入 `tb/`。
+- 工具脚本报输入路径错误：优先检查 `--input-path`/`--input` 是否存在。
+- 权重加载失败：确认 `--weights` 文件存在且与类别配置一致。
