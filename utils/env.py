@@ -8,6 +8,19 @@ from .file_io import dump_text
 
 def collect_env_info(device):
     gpu_names = []
+    npu_available = False
+    npu_device_count = 0
+    npu_names = []
+    if hasattr(torch, "npu"):
+        try:
+            npu_available = bool(torch.npu.is_available()) if hasattr(torch.npu, "is_available") else True
+            npu_device_count = int(torch.npu.device_count()) if hasattr(torch.npu, "device_count") else 0
+            if hasattr(torch.npu, "get_device_name"):
+                npu_names = [torch.npu.get_device_name(i) for i in range(npu_device_count)]
+        except Exception:
+            npu_available = False
+            npu_device_count = 0
+            npu_names = []
     if torch.cuda.is_available():
         gpu_names = [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
     return {
@@ -19,6 +32,10 @@ def collect_env_info(device):
         "cuda_device_count": torch.cuda.device_count(),
         "cuda_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu",
         "cuda_names": gpu_names,
+        "npu_available": npu_available,
+        "npu_device_count": npu_device_count,
+        "npu_names": npu_names,
+        "runtime_device_type": str(device),
     }
 
 

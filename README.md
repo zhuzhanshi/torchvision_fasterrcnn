@@ -18,6 +18,7 @@ pip install -r requirements.txt
 可选依赖说明：
 - `pycocotools`：COCO 数据集读取与 COCO 风格评估必须。
 - `tensorboard`：仅在 `LOG.TENSORBOARD=true` 时需要；若缺失会自动降级并打印 warning。
+- `torch_npu`：仅 Ascend NPU 运行需要。由于版本与 CANN/torch 强相关，不在 `requirements.txt` 强制安装。
 
 ## 运行入口
 
@@ -28,6 +29,23 @@ python main.py --config configs/fasterrcnn_resnet50_fpn.py --mode train --data-r
 python main.py --config configs/fasterrcnn_resnet50_fpn.py --mode test  --data-root /path/to/data --weights /path/to/model_weights.pth
 python main.py --config configs/fasterrcnn_resnet50_fpn.py --mode infer --weights /path/to/model_weights.pth --input-path /path/to/image_or_dir
 ```
+
+### Ascend NPU（单卡）示例
+
+```bash
+# train
+python main.py --config configs/fasterrcnn_resnet50_fpn.py --mode train --device npu --data-root /path/to/data
+
+# test
+python main.py --config configs/fasterrcnn_resnet50_fpn.py --mode test --device npu --weights /path/to/model_weights.pth --data-root /path/to/data
+
+# infer
+python main.py --config configs/fasterrcnn_resnet50_fpn.py --mode infer --device npu --weights /path/to/model_weights.pth --input-path /path/to/image_or_dir
+```
+
+说明：
+- 当前实现为**单卡 NPU 支持**（不含 DDP/HCCL）。
+- 当 `RUNTIME.DEVICE=npu` 时会在运行时尝试导入 `torch_npu`；若缺失会给出明确错误。
 
 ### 方式 B：薄封装入口
 

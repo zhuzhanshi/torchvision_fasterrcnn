@@ -64,6 +64,8 @@ def normalize_cfg(cfg: dict):
 
     # Runtime/Train AMP + resume alias
     runtime = cfg.get("RUNTIME", {})
+    if "DEVICE" in runtime and runtime["DEVICE"] is not None:
+        runtime["DEVICE"] = str(runtime["DEVICE"]).lower()
     train = cfg.get("TRAIN", {})
     if "USE_AMP" not in runtime and "AMP" in train:
         runtime["USE_AMP"] = bool(train["AMP"])

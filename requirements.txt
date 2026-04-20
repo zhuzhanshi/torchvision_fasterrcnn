@@ -4,3 +4,5 @@ pycocotools>=2.0.7
 tensorboard>=2.14.0
 pillow>=9.0.0
 numpy>=1.23.0
+# NOTE: Ascend NPU users should install torch_npu separately according to
+# their CANN / PyTorch version compatibility matrix.

@@ -8,7 +8,7 @@ CFG = {
         "OUTPUT_ROOT": "outputs",
         "EXISTING_OUTPUT_DIR": "",  # optional: reuse an existing experiment directory (mainly for test/infer)
         "SEED": 42,
-        "DEVICE": "cuda",
+        "DEVICE": "cuda",  # cpu | cuda | npu (single-card)
         "GPU_IDS": [],
         "NUM_WORKERS": 4,
         "PIN_MEMORY": True,

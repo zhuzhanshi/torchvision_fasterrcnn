@@ -3,9 +3,9 @@ from __future__ import annotations
 import os
 import time
 from collections import defaultdict
+from contextlib import nullcontext
 
 import torch
-from torch.cuda.amp import GradScaler, autocast
 
 from .evaluator import Evaluator
 from utils.checkpoint import load_checkpoint, save_checkpoint
@@ -24,8 +24,8 @@ class Trainer:
         self.logger = logger
         self.output_dir = output_dir
 
-        amp_enabled = bool(cfg["RUNTIME"].get("USE_AMP", cfg["TRAIN"].get("AMP", True))) and device.type == "cuda"
-        self.scaler = GradScaler(enabled=amp_enabled)
+        self.amp_enabled = bool(cfg["RUNTIME"].get("USE_AMP", cfg["TRAIN"].get("AMP", True)))
+        self.scaler = self._build_scaler(device)
 
         self.best_metric = float("-inf")
         self.start_epoch = int(cfg["TRAIN"].get("START_EPOCH", 0))
@@ -34,6 +34,31 @@ class Trainer:
         resume_path = cfg["RUNTIME"].get("RESUME", cfg["TRAIN"].get("RESUME", ""))
         if resume_path:
             self.resume(resume_path)
+
+    def _build_scaler(self, device):
+        if not self.amp_enabled:
+            return torch.cuda.amp.GradScaler(enabled=False)
+        if device.type == "cuda":
+            return torch.cuda.amp.GradScaler(enabled=True)
+        if device.type == "npu":
+            # Conservative fallback for broad torch/torch_npu compatibility.
+            # If future torch_npu exposes a stable GradScaler API, this can be upgraded.
+            self.logger.warning("AMP requested on NPU; GradScaler fallback is disabled for compatibility in this build.")
+            return torch.cuda.amp.GradScaler(enabled=False)
+        return torch.cuda.amp.GradScaler(enabled=False)
+
+    def _autocast_context(self):
+        if not self.amp_enabled:
+            return nullcontext()
+        if self.device.type == "cuda":
+            return torch.autocast(device_type="cuda", enabled=True)
+        if self.device.type == "npu":
+            try:
+                return torch.autocast(device_type="npu", enabled=True)
+            except Exception:
+                self.logger.warning("AMP autocast for NPU is unavailable; training will continue in FP32.")
+                return nullcontext()
+        return nullcontext()
 
     def resume(self, path):
         ckpt = load_checkpoint(path, map_location="cpu")
@@ -98,7 +123,7 @@ class Trainer:
         total_epochs = int(self.cfg["TRAIN"]["EPOCHS"])
         self.logger.info(
             f"Training started: start_epoch={self.start_epoch}, total_epochs={total_epochs}, "
-            f"accumulation={self.cfg['TRAIN'].get('ACCUMULATION_STEPS', 1)}, amp={self.scaler.is_enabled()}"
+            f"accumulation={self.cfg['TRAIN'].get('ACCUMULATION_STEPS', 1)}, amp={self.amp_enabled}, device={self.device}"
         )
 
         for epoch in range(self.start_epoch, total_epochs):
@@ -161,7 +186,7 @@ class Trainer:
             data_time = time.time() - last_time
             images, targets = to_device(images, targets, self.device)
 
-            with autocast(enabled=self.scaler.is_enabled()):
+            with self._autocast_context():
                 loss_dict = self.model(images, targets)
                 loss_total = sum(loss for loss in loss_dict.values())
                 loss = loss_total / accum
@@ -194,7 +219,12 @@ class Trainer:
             print_freq = int(self.cfg["RUNTIME"].get("PRINT_FREQ", self.cfg["TRAIN"].get("PRINT_FREQ", 20)))
             if (i + 1) % print_freq == 0:
                 eta_sec = (iters - i - 1) * (time.time() - epoch_start) / max(1, i + 1)
-                gpu_mem = torch.cuda.max_memory_allocated() / 1024**2 if self.device.type == "cuda" else 0.0
+                if self.device.type == "cuda":
+                    gpu_mem = torch.cuda.max_memory_allocated() / 1024**2
+                elif self.device.type == "npu" and hasattr(torch, "npu") and hasattr(torch.npu, "memory_allocated"):
+                    gpu_mem = torch.npu.memory_allocated() / 1024**2
+                else:
+                    gpu_mem = 0.0
                 msg = (
                     f"epoch={epoch} iter={i+1}/{iters} lr={lr:.8f} "
                     f"loss_total={loss_value:.4f} "

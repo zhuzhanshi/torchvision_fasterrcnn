@@ -108,6 +108,40 @@ def _configure_torch_runtime(cfg):
         torch.backends.cudnn.deterministic = bool(cfg["RUNTIME"].get("DETERMINISTIC", False))
 
 
+def _resolve_runtime_device(cfg, logger):
+    import torch
+
+    req = str(cfg["RUNTIME"].get("DEVICE", "cuda" if torch.cuda.is_available() else "cpu")).lower()
+
+    if req.startswith("cpu"):
+        device = torch.device("cpu")
+    elif req.startswith("cuda"):
+        if not torch.cuda.is_available():
+            raise RuntimeError("RUNTIME.DEVICE is set to CUDA, but torch.cuda.is_available() is False.")
+        device = torch.device(req if ":" in req else "cuda")
+    elif req.startswith("npu"):
+        try:
+            import torch_npu  # noqa: F401
+        except Exception as e:
+            raise ImportError(
+                "RUNTIME.DEVICE is set to NPU but torch_npu is not available. "
+                "Please install Ascend torch_npu for your CANN/PyTorch version."
+            ) from e
+        if not hasattr(torch, "npu"):
+            raise RuntimeError("torch_npu imported, but torch.npu backend is unavailable.")
+        device = torch.device(req if ":" in req else "npu:0")
+        if hasattr(torch.npu, "set_device"):
+            torch.npu.set_device(device)
+        avail = torch.npu.is_available() if hasattr(torch.npu, "is_available") else True
+        if not avail:
+            raise RuntimeError("RUNTIME.DEVICE is set to NPU but torch.npu.is_available() is False.")
+    else:
+        raise ValueError(f"Unsupported RUNTIME.DEVICE={req}. Supported: cpu / cuda / npu.")
+
+    logger.info(f"Runtime device resolved: requested={req}, actual={device}")
+    return device
+
+
 def build_runtime(cfg, args):
     import torch
 
@@ -122,7 +156,7 @@ def build_runtime(cfg, args):
 
     set_seed(cfg["RUNTIME"].get("SEED", 42))
     _configure_torch_runtime(cfg)
-    device = torch.device(cfg["RUNTIME"].get("DEVICE", "cuda" if torch.cuda.is_available() else "cpu"))
+    device = _resolve_runtime_device(cfg, logger)
 
     model = build_model(cfg).to(device)
     if cfg["LOG"].get("LOG_MODEL_STRUCTURE", False):
