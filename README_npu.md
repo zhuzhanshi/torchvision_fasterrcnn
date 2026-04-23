@@ -144,7 +144,89 @@ outputs/{model_name}/{exp_name}/{timestamp}/
 
 ---
 
-## 8. 常见问题（NPU）
+## 8. 离线权重使用指南（TorchVision）
+
+在 NPU 环境里，很多机器默认不能联网。  
+而 torchvision 的 `weights="DEFAULT"` 首次使用时通常会自动下载权重，所以离线场景建议使用本地权重文件。
+
+### 8.1 为什么需要离线权重
+
+- 训练机/推理机不能访问公网
+- 容器网络策略限制外网下载
+- 希望固定权重版本，保证可复现
+
+### 8.2 如何下载 torchvision 权重（官方方式）
+
+#### 方式 A：Python 自动下载（推荐）
+
+在可联网机器执行：
+
+```bash
+python - <<EOF
+from torchvision.models.detection import fasterrcnn_resnet50_fpn
+model = fasterrcnn_resnet50_fpn(weights="DEFAULT")
+print("downloaded and cached")
+EOF
+```
+
+说明：
+- 首次运行会自动下载
+- 缓存目录通常在：
+  - `~/.cache/torch/hub/checkpoints/`
+
+#### 方式 B：手动下载（CDN）
+
+torchvision 预训练权重来自 PyTorch 官方 CDN，可手动下载后拷贝到目标机器。  
+示例（resnet50_fpn）：
+- `https://download.pytorch.org/models/fasterrcnn_resnet50_fpn_coco-258fb6c6.pth`
+
+### 8.3 如何放置离线权重
+
+推荐方式 1（项目内管理）：
+
+```text
+project/
+├── weights/
+│   └── fasterrcnn_resnet50_fpn_coco.pth
+```
+
+方式 2（任意绝对路径）：
+- `/data/weights/fasterrcnn_resnet50_fpn_coco.pth`
+
+### 8.4 如何在 config 中使用
+
+```python
+CFG["MODEL"]["WEIGHTS"] = "/path/to/xxx.pth"
+CFG["MODEL"]["PRETRAINED"] = False
+```
+
+说明：
+- 一旦 `MODEL.WEIGHTS` 是本地路径，builder 会优先走本地加载，不再使用 `DEFAULT` 在线权重。
+- 该情况下 `PRETRAINED` 会被本地路径逻辑覆盖（等价于被忽略）。
+
+### 8.5 如何验证加载成功
+
+启动训练/测试后，关注日志或 warning：
+- 本地权重加载触发后会尝试 `load_state_dict`
+- 如果结构有差异，会看到 `missing_keys` / `unexpected_keys` 信息
+
+### 8.6 常见错误排查
+
+错误 1：
+- `FileNotFoundError: ...xxx.pth`
+- 原因：权重路径写错或文件未挂载进容器
+
+错误 2：
+- `missing_keys` / `unexpected_keys`
+- 原因：权重文件和当前模型结构（类别数、head 结构、模型变体）不匹配
+
+错误 3：
+- `AttributeError: DEFAULT`
+- 旧版本 builder 可能因 weights enum 解析方式不稳触发；当前版本已改为显式 registry 解析。
+
+---
+
+## 9. 常见问题（NPU）
 
 ### Q1: 报错 “torch_npu is not available”
 你把 `--device npu` 打开了，但环境里没有可用 `torch_npu`。  
