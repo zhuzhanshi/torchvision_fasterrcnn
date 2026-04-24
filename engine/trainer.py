@@ -177,6 +177,44 @@ class Trainer:
         max_norm = float(cfg if cfg is not None else self.cfg["TRAIN"].get("GRAD_CLIP_NORM", 0.0))
         return max_norm > 0, max_norm, 2.0
 
+    @staticmethod
+    def _target_stats_per_image(image, target):
+        boxes = target.get("boxes")
+        labels = target.get("labels")
+        h = int(image.shape[-2]) if hasattr(image, "shape") else -1
+        w = int(image.shape[-1]) if hasattr(image, "shape") else -1
+        stat = {
+            "image_hw": [h, w],
+            "num_boxes": 0,
+            "is_empty_target": True,
+            "boxes_min": None,
+            "boxes_max": None,
+            "box_w_minmax": None,
+            "box_h_minmax": None,
+            "labels_unique": [],
+            "has_label_zero": False,
+            "coords_likely_normalized_0_1": False,
+        }
+
+        if boxes is not None and boxes.numel() > 0:
+            stat["num_boxes"] = int(boxes.shape[0])
+            stat["is_empty_target"] = False
+            stat["boxes_min"] = float(boxes.min().item())
+            stat["boxes_max"] = float(boxes.max().item())
+            bw = boxes[:, 2] - boxes[:, 0]
+            bh = boxes[:, 3] - boxes[:, 1]
+            stat["box_w_minmax"] = [float(bw.min().item()), float(bw.max().item())]
+            stat["box_h_minmax"] = [float(bh.min().item()), float(bh.max().item())]
+            # Heuristic: all coords <= 1 is usually normalized coordinates, suspicious for torchvision detection inputs.
+            stat["coords_likely_normalized_0_1"] = bool(float(boxes.max().item()) <= 1.0)
+
+        if labels is not None and labels.numel() > 0:
+            uniq = torch.unique(labels).tolist()
+            stat["labels_unique"] = [int(x) for x in uniq]
+            stat["has_label_zero"] = any(int(x) == 0 for x in uniq)
+
+        return stat
+
     def train_one_epoch(self, epoch):
         self.model.train()
         if len(self.train_loader) == 0:
@@ -190,23 +228,51 @@ class Trainer:
         self.optimizer.zero_grad(set_to_none=True)
         epoch_start = time.time()
         last_time = time.time()
+        debug_iters = int(self.cfg["RUNTIME"].get("DEBUG_ITERS", 3))
 
         for i, (images, targets) in enumerate(self.train_loader):
             data_time = time.time() - last_time
             images, targets = to_device(images, targets, self.device)
 
+            if i < debug_iters and is_main_process():
+                per_img_stats = [self._target_stats_per_image(img, tgt) for img, tgt in zip(images, targets)]
+                num_empty = sum(int(s["is_empty_target"]) for s in per_img_stats)
+                self.logger.info(
+                    f"[debug][target] epoch={epoch} iter={i+1}/{iters} "
+                    f"batch_size={len(images)} empty_targets={num_empty}/{len(images)} stats={per_img_stats}"
+                )
+
             with self._autocast_context():
                 loss_dict = self.model(images, targets)
-                loss_total = sum(loss for loss in loss_dict.values())
-                loss = loss_total / accum
+                loss_total_unscaled = sum(loss for loss in loss_dict.values())
+                loss_scaled = loss_total_unscaled / accum
 
             loss_dict_reduced = reduce_dict(loss_dict, average=True)
-            loss_total_reduced = sum(v for v in loss_dict_reduced.values())
-            loss_value = float(loss_total_reduced.item())
-            if not is_finite_number(loss_value):
-                raise FloatingPointError(f"Non-finite loss detected at epoch={epoch}, iter={i}: loss_total={loss_value}")
+            loss_total_reduced_unscaled = sum(v for v in loss_dict_reduced.values())
+            loss_value_unscaled = float(loss_total_reduced_unscaled.item())
+            loss_value_scaled = loss_value_unscaled / accum
+            if not is_finite_number(loss_value_unscaled):
+                raise FloatingPointError(
+                    f"Non-finite loss detected at epoch={epoch}, iter={i}: "
+                    f"loss_total_unscaled={loss_value_unscaled}"
+                )
 
-            self.scaler.scale(loss).backward()
+            if i < debug_iters and is_main_process():
+                loss_tensor_meta = {
+                    k: {
+                        "value": float(v.detach().item()),
+                        "dtype": str(v.dtype),
+                        "device": str(v.device),
+                    }
+                    for k, v in loss_dict.items()
+                }
+                self.logger.info(
+                    f"[debug][loss_dict] epoch={epoch} iter={i+1}/{iters} "
+                    f"unscaled_total={loss_value_unscaled:.6f} scaled_for_backward={loss_value_scaled:.6f} "
+                    f"details={loss_tensor_meta}"
+                )
+
+            self.scaler.scale(loss_scaled).backward()
 
             should_step = ((i + 1) % accum == 0) or ((i + 1) == iters)
             if should_step:
@@ -220,7 +286,7 @@ class Trainer:
             iter_time = time.time() - last_time
             last_time = time.time()
 
-            meter["loss_total"] += loss_value
+            meter["loss_total"] += loss_value_unscaled
             meter["loss_classifier"] += float(loss_dict_reduced.get("loss_classifier", torch.tensor(0.0)).item())
             meter["loss_box_reg"] += float(loss_dict_reduced.get("loss_box_reg", torch.tensor(0.0)).item())
             meter["loss_objectness"] += float(loss_dict_reduced.get("loss_objectness", torch.tensor(0.0)).item())
@@ -238,11 +304,11 @@ class Trainer:
                     gpu_mem = 0.0
                 msg = (
                     f"epoch={epoch} iter={i+1}/{iters} lr={lr:.8f} "
-                    f"loss_total={loss_value:.4f} "
-                    f"loss_classifier={loss_dict.get('loss_classifier', torch.tensor(0.)).item():.4f} "
-                    f"loss_box_reg={loss_dict.get('loss_box_reg', torch.tensor(0.)).item():.4f} "
-                    f"loss_objectness={loss_dict.get('loss_objectness', torch.tensor(0.)).item():.4f} "
-                    f"loss_rpn_box_reg={loss_dict.get('loss_rpn_box_reg', torch.tensor(0.)).item():.4f} "
+                    f"loss_total={loss_value_unscaled:.4f} "
+                    f"loss_classifier={float(loss_dict_reduced.get('loss_classifier', torch.tensor(0.)).item()):.4f} "
+                    f"loss_box_reg={float(loss_dict_reduced.get('loss_box_reg', torch.tensor(0.)).item()):.4f} "
+                    f"loss_objectness={float(loss_dict_reduced.get('loss_objectness', torch.tensor(0.)).item()):.4f} "
+                    f"loss_rpn_box_reg={float(loss_dict_reduced.get('loss_rpn_box_reg', torch.tensor(0.)).item()):.4f} "
                     f"data_time={data_time:.3f}s iter_time={iter_time:.3f}s eta={eta_sec/60:.1f}m "
                     + (f"gpu_memory={gpu_mem:.1f}MB" if self.cfg["LOG"].get("LOG_MEMORY", True) else "gpu_memory=disabled")
                 )
