@@ -124,11 +124,25 @@ class Inferencer:
     def run(self, model, device, output_dir):
         model.eval()
         infer_cfg = self.cfg["INFER"]
+        model_ref = model.module if hasattr(model, "module") else model
+
+        min_size = int(infer_cfg.get("MIN_SIZE", 0) or 0)
+        max_size = int(infer_cfg.get("MAX_SIZE", 0) or 0)
+        if hasattr(model_ref, "transform"):
+            if min_size > 0:
+                model_ref.transform.min_size = (min_size,)
+            if max_size > 0:
+                model_ref.transform.max_size = max_size
+            if self.logger and (min_size > 0 or max_size > 0):
+                self.logger.info(
+                    f"Infer override model transform size: min_size={model_ref.transform.min_size}, "
+                    f"max_size={model_ref.transform.max_size}"
+                )
 
         # torchvisions's ROIHeads already performs NMS; we expose infer-time override for deployment convenience.
-        model.roi_heads.score_thresh = float(infer_cfg.get("SCORE_THRESH", model.roi_heads.score_thresh))
-        model.roi_heads.nms_thresh = float(infer_cfg.get("NMS_THRESH", model.roi_heads.nms_thresh))
-        model.roi_heads.detections_per_img = int(infer_cfg.get("MAX_DETS", model.roi_heads.detections_per_img))
+        model_ref.roi_heads.score_thresh = float(infer_cfg.get("SCORE_THRESH", model_ref.roi_heads.score_thresh))
+        model_ref.roi_heads.nms_thresh = float(infer_cfg.get("NMS_THRESH", model_ref.roi_heads.nms_thresh))
+        model_ref.roi_heads.detections_per_img = int(infer_cfg.get("MAX_DETS", model_ref.roi_heads.detections_per_img))
 
         files, root_dir = self._gather_inputs(infer_cfg.get("INPUT_PATH", ""))
         for sub in ["vis", "json", "txt"]:

@@ -171,7 +171,106 @@ outputs/{model}/{exp}/{timestamp}/config_snapshot.py
 
 ---
 
-## 8. 常见错误与排查
+## 8. 输入尺寸与增强配置说明（Faster R-CNN 重点）
+
+### 8.1 Faster R-CNN 不是固定输入尺寸
+
+`torchvision` 的 Faster R-CNN 默认是“短边缩放 + 长边约束”策略，不是固定 `HxW`。  
+你主要控制的是：
+
+- `MODEL.MIN_SIZE`
+- `MODEL.MAX_SIZE`
+
+训练时，模型内部 transform 会把图片按这两个参数做缩放（并保持比例）。
+
+### 8.2 random resize 的作用
+
+`AUG.TRAIN.RANDOM_RESIZE` 会在训练数据层随机选择短边尺度，提升尺度鲁棒性。  
+这和模型内部 `MIN_SIZE/MAX_SIZE` 是两层机制：  
+- 数据增强层：随机扰动  
+- 模型层：最终进入检测器前的约束缩放
+
+### 8.3 random crop 的风险
+
+检测任务里随机裁剪容易带来：
+- 目标框被大量裁掉
+- 小目标完全消失
+- 类别分布偏移
+
+如果数据本身目标较小或稀疏，建议先关闭或谨慎调小裁剪强度。
+
+### 8.4 eval / infer 如何设置图片尺寸
+
+你可以单独覆盖验证/推理阶段的模型 transform：
+
+- `EVAL.MIN_SIZE` / `EVAL.MAX_SIZE`
+- `INFER.MIN_SIZE` / `INFER.MAX_SIZE`
+
+当这些值 > 0 时，会在 eval/infer 阶段覆盖模型默认 transform 尺寸。  
+若为 0，则沿用模型默认配置（`MODEL.MIN_SIZE/MAX_SIZE`）。
+
+---
+
+## 9. 数据集统计（训练前）
+
+`DATASET` 新增字段：
+
+- `STATS_BEFORE_TRAIN`: 训练开始前是否统计
+- `SAVE_STATS`: 是否保存统计文件
+- `STATS_SPLITS`: 要统计的 split 列表（如 `["train", "val", "test"]`）
+
+统计输出目录：
+
+```text
+outputs/{model}/{exp}/{timestamp}/dataset_stats/
+├── dataset_stats.json
+├── dataset_stats.csv
+└── dataset_stats.txt
+```
+
+包含：
+- 各 split 图片数量
+- 各类别框数量（box_count）
+- 各类别出现图片数（image_count）
+- 空标注图片数量
+- bbox 尺度分布（small / medium / large）
+
+---
+
+## 10. 验证调度策略（DURING / AFTER）
+
+`EVAL` 推荐关键字段：
+
+```python
+"EVAL": {
+    "DURING_TRAIN": True,
+    "INTERVAL": 1,
+    "AFTER_TRAIN": True,
+    "BEST_METRIC": "map",
+}
+```
+
+支持四种策略：
+
+1) 训练中周期验证  
+- `DURING_TRAIN=True`, `INTERVAL=1`
+
+2) 只在训练结束后验证一次  
+- `DURING_TRAIN=False`, `AFTER_TRAIN=True`
+
+3) 两者都启用  
+- 训练中按 interval 验证 + 训练结束后 final eval
+
+4) 两者都关闭  
+- `DURING_TRAIN=False`, `AFTER_TRAIN=False`
+
+注意：
+- `best checkpoint` 只基于训练过程中的验证结果更新
+- 训练后 final eval 结果会保存到 `eval/final/final_metrics.json`
+
+---
+
+## 11. 常见错误与排查
 
 ### 错误1：NUM_CLASSES 不一致
 症状：启动时报类别数相关错误。  

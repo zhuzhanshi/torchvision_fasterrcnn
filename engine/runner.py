@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import csv
 import os
 from dataclasses import dataclass
 
-from datasets.builder import build_dataloaders
+import numpy as np
+
+from datasets.builder import build_dataloaders, build_dataset
 from models.builder import build_model, load_model_weights
 from utils.config import pretty_cfg, snapshot_config
 from utils.dist import barrier, get_rank, get_world_size, init_distributed_mode, is_main_process
 from utils.env import collect_env_info, save_env_info
-from utils.file_io import ensure_dir
+from utils.file_io import dump_json, dump_text, ensure_dir
 from utils.logger import build_logger
 from utils.misc import now_str
 from utils.seed import set_seed
@@ -27,6 +30,139 @@ class RuntimeContext:
     device: object
     model: object
     distributed: bool
+
+
+def _collect_dataset_stats(cfg, output_dir, logger):
+    ds_cfg = cfg.get("DATASET", {})
+    if not bool(ds_cfg.get("SAVE_STATS", True)):
+        return
+
+    splits = list(ds_cfg.get("STATS_SPLITS", ["train", "val", "test"]))
+    if not splits:
+        return
+    class_names = list(ds_cfg.get("CLASSES", []))
+    stats_root = os.path.join(output_dir, "dataset_stats")
+    ensure_dir(stats_root)
+
+    result = {
+        "dataset_type": ds_cfg.get("TYPE", ""),
+        "data_root": ds_cfg.get("ROOT", ds_cfg.get("DATA_ROOT", "")),
+        "splits": {},
+    }
+
+    for split in splits:
+        split_name = str(split).strip().lower()
+        if split_name not in {"train", "val", "test"}:
+            logger.warning(f"Skip unknown DATASET.STATS_SPLITS item={split!r}. Supported: train/val/test.")
+            continue
+        try:
+            dataset = build_dataset(cfg, split=split_name)
+        except Exception as e:
+            logger.warning(f"Failed to build dataset stats for split={split_name}: {e}")
+            continue
+
+        # Avoid random train-time augmentations in stats traversal.
+        if hasattr(dataset, "transforms"):
+            dataset.transforms = None
+
+        per_class_box_count = {i + 1: 0 for i in range(len(class_names))}
+        per_class_image_count = {i + 1: 0 for i in range(len(class_names))}
+        empty_images = 0
+        box_wh = []
+        box_area = []
+        num_images = len(dataset)
+
+        for idx in range(num_images):
+            _, target = dataset[idx]
+            boxes = target.get("boxes")
+            labels = target.get("labels")
+            if boxes is None or boxes.numel() == 0:
+                empty_images += 1
+                continue
+            labels_np = labels.detach().cpu().numpy().astype(int).tolist()
+            boxes_np = boxes.detach().cpu().numpy()
+            present = set()
+            for b, lbl in zip(boxes_np, labels_np):
+                if lbl <= 0 or lbl not in per_class_box_count:
+                    continue
+                x1, y1, x2, y2 = [float(x) for x in b.tolist()]
+                w = max(0.0, x2 - x1)
+                h = max(0.0, y2 - y1)
+                if w <= 0 or h <= 0:
+                    continue
+                per_class_box_count[lbl] += 1
+                present.add(lbl)
+                box_wh.append([w, h])
+                box_area.append(w * h)
+            for lbl in present:
+                per_class_image_count[lbl] += 1
+
+        box_area = np.asarray(box_area, dtype=np.float64) if box_area else np.asarray([], dtype=np.float64)
+        bbox_scale_distribution = {
+            "small(<32^2)": int(np.sum(box_area < (32.0**2))) if box_area.size else 0,
+            "medium([32^2,96^2))": int(np.sum((box_area >= (32.0**2)) & (box_area < (96.0**2)))) if box_area.size else 0,
+            "large(>=96^2)": int(np.sum(box_area >= (96.0**2))) if box_area.size else 0,
+        }
+
+        per_class_rows = []
+        for label_id in range(1, len(class_names) + 1):
+            per_class_rows.append(
+                {
+                    "label_id": label_id,
+                    "class_name": class_names[label_id - 1],
+                    "box_count": int(per_class_box_count[label_id]),
+                    "image_count": int(per_class_image_count[label_id]),
+                }
+            )
+
+        split_stats = {
+            "split": split_name,
+            "num_images": int(num_images),
+            "empty_annotation_images": int(empty_images),
+            "num_boxes": int(sum(per_class_box_count.values())),
+            "bbox_scale_distribution": bbox_scale_distribution,
+            "per_class": per_class_rows,
+        }
+        result["splits"][split_name] = split_stats
+
+    dump_json(result, os.path.join(stats_root, "dataset_stats.json"))
+    # csv
+    csv_rows = []
+    for split_name, split_stats in result["splits"].items():
+        for row in split_stats["per_class"]:
+            csv_rows.append(
+                {
+                    "split": split_name,
+                    "label_id": row["label_id"],
+                    "class_name": row["class_name"],
+                    "box_count": row["box_count"],
+                    "image_count": row["image_count"],
+                    "num_images": split_stats["num_images"],
+                    "empty_annotation_images": split_stats["empty_annotation_images"],
+                }
+            )
+    if csv_rows:
+        csv_path = os.path.join(stats_root, "dataset_stats.csv")
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=list(csv_rows[0].keys()))
+            writer.writeheader()
+            for r in csv_rows:
+                writer.writerow(r)
+
+    # txt
+    lines = []
+    for split_name, split_stats in result["splits"].items():
+        lines.append(f"[{split_name}] num_images={split_stats['num_images']} empty={split_stats['empty_annotation_images']}")
+        lines.append(
+            "bbox_scale_distribution: "
+            + ", ".join(f"{k}={v}" for k, v in split_stats["bbox_scale_distribution"].items())
+        )
+        for row in split_stats["per_class"]:
+            lines.append(
+                f"  class={row['class_name']} label={row['label_id']} box_count={row['box_count']} image_count={row['image_count']}"
+            )
+    dump_text("\n".join(lines) + ("\n" if lines else ""), os.path.join(stats_root, "dataset_stats.txt"))
+    logger.info(f"Dataset stats saved to {stats_root}")
 
 
 def build_optimizer(cfg, model):
@@ -227,6 +363,9 @@ def build_runtime(cfg, args):
 def run_train(ctx: RuntimeContext):
     if ctx.cfg["RUNTIME"].get("EVAL_BEFORE_TRAIN", False):
         run_test(ctx)
+    if is_main_process() and bool(ctx.cfg["DATASET"].get("STATS_BEFORE_TRAIN", True)):
+        _collect_dataset_stats(ctx.cfg, ctx.output_dir, ctx.logger)
+    barrier()
     _, loaders = build_dataloaders(ctx.cfg, mode="train")
     if len(loaders["train"]) == 0:
         raise RuntimeError("Train dataloader is empty; cannot start training.")

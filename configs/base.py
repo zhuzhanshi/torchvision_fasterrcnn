@@ -45,6 +45,9 @@ CFG = {
         "MIN_BOX_AREA": 0.0,
         "IGNORE_DIFFICULT": False,
         "CHECK_DATASET": False,
+        "STATS_BEFORE_TRAIN": True,
+        "SAVE_STATS": True,
+        "STATS_SPLITS": ["train", "val", "test"],
         # backward-compatible aliases
         "DATA_ROOT": "data",
         "ALLOW_EMPTY": False,
@@ -197,13 +200,18 @@ CFG = {
     },
     "EVAL": {
         "ENABLE": True,
+        "DURING_TRAIN": True,
         "INTERVAL": 1,
+        "AFTER_TRAIN": True,
+        "BEST_METRIC": "map",
         "METRIC": "bbox",
         "SAVE_PREDICTIONS": True,
         "SAVE_GT": False,
         "USE_COCO_EVAL": True,
         "SCORE_THRESH": 0.05,
         "MAX_DETS": 100,
+        "MIN_SIZE": 0,
+        "MAX_SIZE": 0,
         "PER_CLASS_AP": True,
         "VISUALIZE": False,
         "VIS_MAX_SAMPLES": 20,
@@ -224,6 +232,8 @@ CFG = {
         "SCORE_THRESH": 0.5,
         "NMS_THRESH": 0.5,
         "MAX_DETS": 100,
+        "MIN_SIZE": 0,
+        "MAX_SIZE": 0,
         "CLASS_FILTER": [],  # supports class name or label id (foreground starts at 1)
     },
     "LOG": {

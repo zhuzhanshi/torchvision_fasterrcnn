@@ -10,6 +10,7 @@ import torch
 from .evaluator import Evaluator
 from utils.checkpoint import load_checkpoint, save_checkpoint
 from utils.dist import is_main_process, reduce_dict
+from utils.file_io import dump_json
 from utils.misc import is_finite_number, to_device
 
 
@@ -126,10 +127,16 @@ class Trainer:
             raise RuntimeError("train_loader is empty. Cannot start training.")
 
         total_epochs = int(self.cfg["TRAIN"]["EPOCHS"])
+        eval_cfg = self.cfg.get("EVAL", {})
+        eval_during_train = bool(eval_cfg.get("DURING_TRAIN", eval_cfg.get("ENABLE", eval_cfg.get("ENABLED", True))))
+        eval_after_train = bool(eval_cfg.get("AFTER_TRAIN", False))
+        eval_interval = int(eval_cfg.get("INTERVAL", 1))
+        best_metric_name = str(eval_cfg.get("BEST_METRIC", self.cfg["TRAIN"].get("SAVE_BEST_METRIC", "map")))
         if is_main_process():
             self.logger.info(
                 f"Training started: start_epoch={self.start_epoch}, total_epochs={total_epochs}, "
-                f"accumulation={self.cfg['TRAIN'].get('ACCUMULATION_STEPS', 1)}, amp={self.amp_enabled}, device={self.device}"
+                f"accumulation={self.cfg['TRAIN'].get('ACCUMULATION_STEPS', 1)}, amp={self.amp_enabled}, device={self.device}, "
+                f"eval_during_train={eval_during_train}, eval_interval={eval_interval}, eval_after_train={eval_after_train}"
             )
 
         for epoch in range(self.start_epoch, total_epochs):
@@ -137,20 +144,12 @@ class Trainer:
                 self.train_loader.sampler.set_epoch(epoch)
             train_stats = self.train_one_epoch(epoch)
 
-            eval_enabled = bool(self.cfg["EVAL"].get("ENABLE", self.cfg["EVAL"].get("ENABLED", True)))
-            eval_interval = int(
-                self.cfg["EVAL"].get(
-                    "INTERVAL",
-                    self.cfg["TRAIN"].get("VALIDATE_EVERY_EPOCH", self.cfg["TRAIN"].get("VAL_EVERY_EPOCH", 1)),
-                )
-            )
-            do_val = self.val_loader is not None and eval_enabled and ((epoch + 1) % max(eval_interval, 1) == 0)
+            do_val = self.val_loader is not None and eval_during_train and ((epoch + 1) % max(eval_interval, 1) == 0)
 
             metric_value = None
             if do_val:
                 metrics = self.validate(epoch)
-                metric_name = self.cfg["TRAIN"].get("SAVE_BEST_METRIC", metrics.get("best_metric_key", "map"))
-                metric_value = float(metrics.get(metric_name, 0.0))
+                metric_value = float(metrics.get(best_metric_name, 0.0))
                 if metric_value > self.best_metric:
                     self.best_metric = metric_value
                     self.save_checkpoint(epoch, is_best=True)
@@ -168,6 +167,18 @@ class Trainer:
 
             if self.cfg["TRAIN"].get("EMPTY_CACHE_PER_EPOCH", False) and self.device.type == "cuda":
                 torch.cuda.empty_cache()
+
+        # Final evaluation at the end of training (optional)
+        if self.val_loader is not None and eval_after_train:
+            final_metrics = self.validate(total_epochs - 1, tag="final")
+            if is_main_process():
+                final_dir = os.path.join(self.output_dir, "eval", "final")
+                os.makedirs(final_dir, exist_ok=True)
+                dump_json(final_metrics, os.path.join(final_dir, "final_metrics.json"))
+                self.logger.info(
+                    f"Final eval completed after training. best_metric_during_train={self.best_metric:.6f} "
+                    f"final_metrics={final_metrics}"
+                )
 
     def _grad_clip_cfg(self):
         cfg = self.cfg["TRAIN"].get("GRAD_CLIP", 0.0)
@@ -350,11 +361,14 @@ class Trainer:
                 self.logger.log_scalars("train_epoch", epoch_scalars, epoch)
         return avg
 
-    def validate(self, epoch):
+    def validate(self, epoch, tag: str | None = None):
         if self.val_loader is None:
             self.logger.warning("validate() called but val_loader is None. Skip validation.")
             return {}
-        out_dir = os.path.join(self.output_dir, "eval", f"epoch_{epoch:03d}")
+        if tag:
+            out_dir = os.path.join(self.output_dir, "eval", tag)
+        else:
+            out_dir = os.path.join(self.output_dir, "eval", f"epoch_{epoch:03d}")
         metrics, per_class_ap = self.evaluator.evaluate(self.model, self.val_loader, self.device, output_dir=out_dir)
         scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, (int, float))}
         if is_main_process():

@@ -45,6 +45,7 @@ class Evaluator:
             self.logger.warning("EVAL.VISUALIZE is set, but evaluator visualization is not implemented yet. Skipping.")
 
         model.eval()
+        self._override_model_transform_size(model)
         start = time.time()
         predictions = []
         gt_coco = {"images": [], "annotations": [], "categories": []}
@@ -132,6 +133,9 @@ class Evaluator:
 
         if is_main_process():
             merged_gt = self._merge_gt_dicts(gathered_gt)
+            per_class_summary = self._build_per_class_summary(
+                merged_gt, gathered_predictions, label_to_cat_id=label_to_cat_id, label_to_cat_name=label_to_cat_name
+            )
             metrics, per_class_ap = self._compute_metrics(
                 gt_dict=merged_gt,
                 predictions=gathered_predictions,
@@ -140,6 +144,7 @@ class Evaluator:
                 label_to_cat_name=label_to_cat_name,
                 label_to_cat_id=label_to_cat_id,
             )
+            per_class_summary = self._merge_ap_into_summary(per_class_summary, per_class_ap)
             metrics["eval_time"] = time.time() - start
             metrics["num_images"] = len(merged_gt["images"])
             metrics["num_predictions"] = len(gathered_predictions)
@@ -151,14 +156,17 @@ class Evaluator:
             metrics["AR"] = metrics["ar"]
         else:
             merged_gt = None
-            metrics, per_class_ap = {}, []
+            per_class_summary, metrics, per_class_ap = [], {}, []
 
-        gathered_result = all_gather({"metrics": metrics, "per_class_ap": per_class_ap})
+        gathered_result = all_gather(
+            {"metrics": metrics, "per_class_ap": per_class_ap, "per_class_summary": per_class_summary}
+        )
         metrics = gathered_result[0]["metrics"]
         per_class_ap = gathered_result[0]["per_class_ap"]
+        per_class_summary = gathered_result[0]["per_class_summary"]
 
         if is_main_process() and output_dir:
-            save_eval_outputs(metrics, per_class_ap, output_dir)
+            save_eval_outputs(metrics, per_class_ap, output_dir, per_class_summary=per_class_summary)
             if save_predictions:
                 dump_json(gathered_predictions, os.path.join(output_dir, "predictions.json"))
             if save_gt:
@@ -175,6 +183,25 @@ class Evaluator:
 
         barrier()
         return metrics, per_class_ap
+
+    def _override_model_transform_size(self, model):
+        eval_cfg = self.cfg.get("EVAL", {})
+        min_size = int(eval_cfg.get("MIN_SIZE", 0) or 0)
+        max_size = int(eval_cfg.get("MAX_SIZE", 0) or 0)
+        if min_size <= 0 and max_size <= 0:
+            return
+        model_ref = model.module if hasattr(model, "module") else model
+        transform = getattr(model_ref, "transform", None)
+        if transform is None:
+            return
+        if min_size > 0:
+            transform.min_size = (int(min_size),)
+        if max_size > 0:
+            transform.max_size = int(max_size)
+        if self.logger:
+            self.logger.info(
+                f"Evaluator override model transform size: min_size={transform.min_size}, max_size={transform.max_size}"
+            )
 
     def _merge_gt_dicts(self, parts):
         merged = {"images": [], "annotations": [], "categories": []}
@@ -293,3 +320,38 @@ class Evaluator:
                 )
 
         return metrics, per_class
+
+    @staticmethod
+    def _build_per_class_summary(gt_dict, predictions, label_to_cat_id, label_to_cat_name):
+        gt_count = {int(cat_id): 0 for cat_id in label_to_cat_id.values()}
+        pred_count = {int(cat_id): 0 for cat_id in label_to_cat_id.values()}
+
+        for ann in gt_dict.get("annotations", []):
+            cid = int(ann.get("category_id", -1))
+            if cid in gt_count:
+                gt_count[cid] += 1
+        for pred in predictions:
+            cid = int(pred.get("category_id", -1))
+            if cid in pred_count:
+                pred_count[cid] += 1
+
+        rows = []
+        for label, cat_id in sorted(label_to_cat_id.items(), key=lambda x: int(x[0])):
+            rows.append(
+                {
+                    "label_id": int(label),
+                    "category_id": int(cat_id),
+                    "category_name": str(label_to_cat_name[int(label)]),
+                    "gt_count": int(gt_count.get(int(cat_id), 0)),
+                    "pred_count": int(pred_count.get(int(cat_id), 0)),
+                    "ap": 0.0,
+                }
+            )
+        return rows
+
+    @staticmethod
+    def _merge_ap_into_summary(summary_rows, per_class_ap):
+        ap_map = {int(r["category_id"]): float(r.get("ap", 0.0)) for r in per_class_ap}
+        for row in summary_rows:
+            row["ap"] = float(ap_map.get(int(row["category_id"]), 0.0))
+        return summary_rows

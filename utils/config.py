@@ -34,6 +34,9 @@ def normalize_cfg(cfg: dict):
     if "DATA_ROOT" not in ds and "ROOT" in ds:
         ds["DATA_ROOT"] = ds["ROOT"]
     ds["ALLOW_EMPTY"] = ds.get("ALLOW_EMPTY", not ds.get("FILTER_EMPTY_GT", False))
+    ds["STATS_BEFORE_TRAIN"] = bool(ds.get("STATS_BEFORE_TRAIN", True))
+    ds["SAVE_STATS"] = bool(ds.get("SAVE_STATS", True))
+    ds["STATS_SPLITS"] = list(ds.get("STATS_SPLITS", ["train", "val", "test"]))
 
     # Input aliases
     inp = cfg.get("INPUT", {})
@@ -94,6 +97,15 @@ def normalize_cfg(cfg: dict):
     # Eval aliases
     eval_cfg = cfg.get("EVAL", {})
     eval_cfg["ENABLED"] = eval_cfg.get("ENABLE", eval_cfg.get("ENABLED", True))
+    eval_cfg["DURING_TRAIN"] = bool(eval_cfg.get("DURING_TRAIN", eval_cfg["ENABLED"]))
+    eval_cfg["INTERVAL"] = int(eval_cfg.get("INTERVAL", train.get("VAL_EVERY_EPOCH", 1)))
+    eval_cfg["AFTER_TRAIN"] = bool(eval_cfg.get("AFTER_TRAIN", False))
+    eval_cfg["BEST_METRIC"] = str(eval_cfg.get("BEST_METRIC", train.get("SAVE_BEST_METRIC", "map")))
+    eval_cfg["MIN_SIZE"] = int(eval_cfg.get("MIN_SIZE", 0) or 0)
+    eval_cfg["MAX_SIZE"] = int(eval_cfg.get("MAX_SIZE", 0) or 0)
+    infer_cfg = cfg.get("INFER", {})
+    infer_cfg["MIN_SIZE"] = int(infer_cfg.get("MIN_SIZE", 0) or 0)
+    infer_cfg["MAX_SIZE"] = int(infer_cfg.get("MAX_SIZE", 0) or 0)
 
     # Weights/resume routing
     model = cfg.get("MODEL", {})
@@ -116,6 +128,7 @@ def normalize_cfg(cfg: dict):
     cfg["RUNTIME"] = runtime
     cfg["TRAIN"] = train
     cfg["EVAL"] = eval_cfg
+    cfg["INFER"] = infer_cfg
     cfg["MODEL"] = model
     return cfg
 
