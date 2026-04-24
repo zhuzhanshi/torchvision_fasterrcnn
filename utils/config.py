@@ -37,6 +37,7 @@ def normalize_cfg(cfg: dict):
     ds["STATS_BEFORE_TRAIN"] = bool(ds.get("STATS_BEFORE_TRAIN", True))
     ds["SAVE_STATS"] = bool(ds.get("SAVE_STATS", True))
     ds["STATS_SPLITS"] = list(ds.get("STATS_SPLITS", ["train", "val", "test"]))
+    ds["STATS_BBOX_DISTRIBUTION"] = bool(ds.get("STATS_BBOX_DISTRIBUTION", False))
 
     # Input aliases
     inp = cfg.get("INPUT", {})

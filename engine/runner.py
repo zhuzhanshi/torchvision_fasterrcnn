@@ -41,6 +41,7 @@ def _collect_dataset_stats(cfg, output_dir, logger):
     if not splits:
         return
     class_names = list(ds_cfg.get("CLASSES", []))
+    calc_bbox_distribution = bool(ds_cfg.get("STATS_BBOX_DISTRIBUTION", False))
     stats_root = os.path.join(output_dir, "dataset_stats")
     ensure_dir(stats_root)
 
@@ -68,7 +69,6 @@ def _collect_dataset_stats(cfg, output_dir, logger):
         per_class_box_count = {i + 1: 0 for i in range(len(class_names))}
         per_class_image_count = {i + 1: 0 for i in range(len(class_names))}
         empty_images = 0
-        box_wh = []
         box_area = []
         num_images = len(dataset)
 
@@ -92,17 +92,19 @@ def _collect_dataset_stats(cfg, output_dir, logger):
                     continue
                 per_class_box_count[lbl] += 1
                 present.add(lbl)
-                box_wh.append([w, h])
-                box_area.append(w * h)
+                if calc_bbox_distribution:
+                    box_area.append(w * h)
             for lbl in present:
                 per_class_image_count[lbl] += 1
 
-        box_area = np.asarray(box_area, dtype=np.float64) if box_area else np.asarray([], dtype=np.float64)
-        bbox_scale_distribution = {
-            "small(<32^2)": int(np.sum(box_area < (32.0**2))) if box_area.size else 0,
-            "medium([32^2,96^2))": int(np.sum((box_area >= (32.0**2)) & (box_area < (96.0**2)))) if box_area.size else 0,
-            "large(>=96^2)": int(np.sum(box_area >= (96.0**2))) if box_area.size else 0,
-        }
+        bbox_scale_distribution = {}
+        if calc_bbox_distribution:
+            box_area = np.asarray(box_area, dtype=np.float64) if box_area else np.asarray([], dtype=np.float64)
+            bbox_scale_distribution = {
+                "small(<32^2)": int(np.sum(box_area < (32.0**2))) if box_area.size else 0,
+                "medium([32^2,96^2))": int(np.sum((box_area >= (32.0**2)) & (box_area < (96.0**2)))) if box_area.size else 0,
+                "large(>=96^2)": int(np.sum(box_area >= (96.0**2))) if box_area.size else 0,
+            }
 
         per_class_rows = []
         for label_id in range(1, len(class_names) + 1):
@@ -153,10 +155,11 @@ def _collect_dataset_stats(cfg, output_dir, logger):
     lines = []
     for split_name, split_stats in result["splits"].items():
         lines.append(f"[{split_name}] num_images={split_stats['num_images']} empty={split_stats['empty_annotation_images']}")
-        lines.append(
-            "bbox_scale_distribution: "
-            + ", ".join(f"{k}={v}" for k, v in split_stats["bbox_scale_distribution"].items())
-        )
+        if split_stats["bbox_scale_distribution"]:
+            lines.append(
+                "bbox_scale_distribution: "
+                + ", ".join(f"{k}={v}" for k, v in split_stats["bbox_scale_distribution"].items())
+            )
         for row in split_stats["per_class"]:
             lines.append(
                 f"  class={row['class_name']} label={row['label_id']} box_count={row['box_count']} image_count={row['image_count']}"

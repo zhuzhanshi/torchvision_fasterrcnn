@@ -261,7 +261,6 @@ class Trainer:
             loss_dict_reduced = reduce_dict(loss_dict, average=True)
             loss_total_reduced_unscaled = sum(v for v in loss_dict_reduced.values())
             loss_value_unscaled = float(loss_total_reduced_unscaled.item())
-            loss_value_scaled = loss_value_unscaled / accum
             if not is_finite_number(loss_value_unscaled):
                 raise FloatingPointError(
                     f"Non-finite loss detected at epoch={epoch}, iter={i}: "
@@ -279,7 +278,7 @@ class Trainer:
                 }
                 self.logger.info(
                     f"[debug][loss_dict] epoch={epoch} iter={i+1}/{iters} "
-                    f"unscaled_total={loss_value_unscaled:.6f} scaled_for_backward={loss_value_scaled:.6f} "
+                    f"unscaled_total={loss_value_unscaled:.6f} scaled_for_backward={float(loss_scaled.detach().item()):.6f} "
                     f"details={loss_tensor_meta}"
                 )
 
@@ -329,7 +328,7 @@ class Trainer:
             global_step = epoch * iters + i
             if self.cfg["LOG"].get("LOG_ITER_LOSS", True):
                 iter_scalars = {
-                    "loss_total": loss_value,
+                    "loss_total": loss_value_unscaled,
                     "loss_classifier": float(loss_dict_reduced.get("loss_classifier", torch.tensor(0.0)).item()),
                     "loss_box_reg": float(loss_dict_reduced.get("loss_box_reg", torch.tensor(0.0)).item()),
                     "loss_objectness": float(loss_dict_reduced.get("loss_objectness", torch.tensor(0.0)).item()),

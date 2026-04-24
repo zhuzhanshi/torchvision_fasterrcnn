@@ -48,6 +48,7 @@ CFG = {
         "STATS_BEFORE_TRAIN": True,
         "SAVE_STATS": True,
         "STATS_SPLITS": ["train", "val", "test"],
+        "STATS_BBOX_DISTRIBUTION": False,
         # backward-compatible aliases
         "DATA_ROOT": "data",
         "ALLOW_EMPTY": False,

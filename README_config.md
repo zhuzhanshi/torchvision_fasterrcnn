@@ -218,6 +218,7 @@ outputs/{model}/{exp}/{timestamp}/config_snapshot.py
 - `STATS_BEFORE_TRAIN`: 训练开始前是否统计
 - `SAVE_STATS`: 是否保存统计文件
 - `STATS_SPLITS`: 要统计的 split 列表（如 `["train", "val", "test"]`）
+- `STATS_BBOX_DISTRIBUTION`: 是否统计 bbox 尺度分布（默认 `False`）
 
 统计输出目录：
 
@@ -233,7 +234,11 @@ outputs/{model}/{exp}/{timestamp}/dataset_stats/
 - 各类别框数量（box_count）
 - 各类别出现图片数（image_count）
 - 空标注图片数量
-- bbox 尺度分布（small / medium / large）
+- bbox 尺度分布（small / medium / large，只有 `STATS_BBOX_DISTRIBUTION=True` 时启用）
+
+说明：
+- 默认 `STATS_BBOX_DISTRIBUTION=False`，速度更快（适合常规训练）
+- 当你需要分析目标尺度分布、校验 anchor 设计时，再开启 `True`
 
 ---
 
