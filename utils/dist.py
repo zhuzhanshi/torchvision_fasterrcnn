@@ -75,7 +75,7 @@ def reduce_dict(input_dict, average=True):
 
 def _select_backend(device_str: str, configured: str = "") -> str:
     if configured:
-        return configured
+        return str(configured).lower()
     d = str(device_str).lower()
     if d.startswith("npu"):
         return "hccl"
@@ -110,12 +110,52 @@ def init_distributed_mode(cfg):
     runtime["WORLD_SIZE"] = world_size
     runtime["LOCAL_RANK"] = local_rank
     runtime["DIST_URL"] = runtime.get("DIST_URL", "env://")
-    runtime["DIST_BACKEND"] = _select_backend(runtime.get("DEVICE", "cpu"), runtime.get("DIST_BACKEND", ""))
+    runtime["DIST_BACKEND"] = _select_backend(runtime.get("DEVICE", "cpu"), runtime.get("DIST_BACKEND", "")).lower()
+    backend = runtime["DIST_BACKEND"]
+    device_str = str(runtime.get("DEVICE", "cpu")).lower()
+    ascend_visible = os.environ.get("ASCEND_VISIBLE_DEVICES", "")
+
+    # IMPORTANT for NPU/HCCL:
+    # 1) import torch_npu first
+    # 2) set local device before init_process_group
+    if backend == "hccl" or device_str.startswith("npu"):
+        try:
+            import torch_npu  # noqa: F401
+        except Exception as e:
+            raise ImportError(
+                "Distributed backend is HCCL/NPU, but torch_npu is not available. "
+                "Please install torch_npu compatible with your CANN/PyTorch."
+            ) from e
+        if not hasattr(torch, "npu"):
+            raise RuntimeError("torch_npu imported but torch.npu backend is unavailable.")
+        npu_count = int(torch.npu.device_count())
+        if local_rank < 0 or local_rank >= npu_count:
+            raise RuntimeError(
+                f"Invalid LOCAL_RANK={local_rank} for NPU device_count={npu_count}. "
+                f"ASCEND_VISIBLE_DEVICES={ascend_visible!r}. Please check torchrun rank mapping."
+            )
+        torch.npu.set_device(local_rank)
+        runtime["DEVICE"] = f"npu:{local_rank}"
+    elif backend == "nccl":
+        if not torch.cuda.is_available():
+            raise RuntimeError("Distributed backend is NCCL but torch.cuda.is_available() is False.")
+        if local_rank < 0 or local_rank >= torch.cuda.device_count():
+            raise RuntimeError(
+                f"Invalid LOCAL_RANK={local_rank} for CUDA device_count={torch.cuda.device_count()}."
+            )
+        torch.cuda.set_device(local_rank)
+        runtime["DEVICE"] = f"cuda:{local_rank}"
+
+    print(
+        "[dist] init requested "
+        f"rank={rank} local_rank={local_rank} world_size={world_size} "
+        f"device={runtime.get('DEVICE')} backend={backend} ASCEND_VISIBLE_DEVICES={ascend_visible!r}"
+    )
 
     if is_dist_avail_and_initialized():
         return True
     dist.init_process_group(
-        backend=runtime["DIST_BACKEND"],
+        backend=backend,
         init_method=runtime["DIST_URL"],
         world_size=world_size,
         rank=rank,
